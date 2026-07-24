@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% set active = "logs" %}
+{% block title %}Loglar{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <div><h1>Loglar</h1><p class="text-muted">Tüm sistem ve scraper aktiviteleri</p></div>
+    <div class="flex gap-8">
+        <button class="btn btn-ghost btn-sm" onclick="refreshLogs()">↻ Yenile</button>
+        <button class="btn btn-danger btn-sm" onclick="clearLogs()">Temizle</button>
+    </div>
+</div>
+
+<!-- Filtreler -->
+<div class="card mb-16">
+    <div class="flex gap-8" style="flex-wrap:wrap;align-items:center">
+        <div>
+            <label class="form-label" style="font-size:11px;margin-bottom:4px">Zaman Aralığı</label>
+            <select class="form-select" id="f-days" style="max-width:160px" onchange="refreshLogs()">
+                <option value="1">Son 1 Gün</option>
+                <option value="7">Son 7 Gün</option>
+                <option value="15" selected>Son 15 Gün</option>
+                <option value="30">Son 30 Gün</option>
+                <option value="0">Tümü</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label" style="font-size:11px;margin-bottom:4px">Panel</label>
+            <select class="form-select" id="f-panel" style="max-width:150px" onchange="refreshLogs()">
+                <option value="">Tümü</option>
+                <option value="panel1">B2B Stok</option>
+                <option value="panel2">Fiyat Analiz</option>
+                <option value="system">Sistem</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label" style="font-size:11px;margin-bottom:4px">Durum</label>
+            <select class="form-select" id="f-status" style="max-width:140px" onchange="refreshLogs()">
+                <option value="">Tümü</option>
+                <option value="success">Başarılı</option>
+                <option value="error">Hata</option>
+                <option value="info">Bilgi</option>
+            </select>
+        </div>
+        <div style="margin-top:18px">
+            <span id="log-count" class="badge badge-neutral">— kayıt</span>
+        </div>
+    </div>
+</div>
+
+<div data-tabs>
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="lt-all">Sistem Logları</button>
+        <button class="tab-btn" data-tab="lt-history">B2B Çekim Geçmişi</button>
+    </div>
+
+    <!-- Sistem logları -->
+    <div id="lt-all" class="tab-panel active">
+        <div class="card">
+            <div class="table-container">
+                <table id="log-table">
+                    <thead>
+                        <tr>
+                            <th style="width:150px">Zaman</th>
+                            <th style="width:80px">Panel</th>
+                            <th style="width:100px">Site</th>
+                            <th style="width:80px">Durum</th>
+                            <th>Mesaj</th>
+                            <th>Detay</th>
+                        </tr>
+                    </thead>
+                    <tbody id="log-body">
+                        {% for log in logs %}
+                        {{ render_log_row(log) if render_log_row is defined else '' }}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- B2B Çekim Geçmişi -->
+    <div id="lt-history" class="tab-panel">
+        <div class="card mb-16">
+            <div class="flex gap-8">
+                <select class="form-select" id="h-site" style="max-width:200px"
+                        onchange="loadHistory()">
+                    <option value="">Tüm B2B Siteler</option>
+                </select>
+                <button class="btn btn-ghost btn-sm" onclick="loadHistory()">↻ Yenile</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="table-container">
+                <table id="h-table">
+                    <thead>
+                        <tr>
+                            <th>Tarih</th>
+                            <th>Site</th>
+                            <th>Tür</th>
+                            <th>Durum</th>
+                            <th>Ürün Sayısı</th>
+                            <th>Hata</th>
+                            <th>Dosya</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="7" class="text-muted"
+                                style="text-align:center;padding:32px">
+                            Yukarıdan site seçin veya "Yenile" butonuna basın
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── Sistem logları ─────────────────────────────────────────────────────── */
+function panelBadge(p) {
+    const map = {
+        panel1: '<span class="badge badge-b2b">B2B</span>',
+        panel2: '<span class="badge badge-market">Fiyat</span>',
+        system: '<span class="badge badge-neutral">Sistem</span>',
+        mail:   '<span class="badge badge-info">Mail</span>',
+        ai:     '<span class="badge" style="background:#f3e8ff;color:#7c3aed">AI</span>',
+    };
+    return map[p] || `<span class="badge badge-neutral">${p}</span>`;
+}
+function statusBadge(s) {
+    return {
+        success: '<span class="badge badge-success">✓ Başarılı</span>',
+        error:   '<span class="badge badge-error">✗ Hata</span>',
+        info:    '<span class="badge badge-info">ℹ Bilgi</span>',
+    }[s] || `<span class="badge badge-neutral">${s}</span>`;
+}
+
+async function refreshLogs() {
+    const days   = document.getElementById('f-days').value;
+    const panel  = document.getElementById('f-panel').value;
+    const status = document.getElementById('f-status').value;
+
+    let url = `/logs/api?limit=500`;
+    if (days   && days !== '0') url += `&days=${days}`;
+    if (days === '0')           url += `&days=0`;
+    if (panel)  url += `&panel=${panel}`;
+    if (status) url += `&status=${status}`;
+
+    try {
+        const data = await api('GET', url);
+        const cnt  = document.getElementById('log-count');
+        if (cnt) cnt.textContent = `${data.length} kayıt`;
+
+        const tb = document.getElementById('log-body');
+        if (!data.length) {
+            tb.innerHTML = '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:32px">Bu filtre için kayıt bulunamadı</td></tr>';
+            return;
+        }
+        tb.innerHTML = data.map(r => `<tr>
+            <td style="font-size:12px;white-space:nowrap">${r.timestamp}</td>
+            <td>${panelBadge(r.panel)}</td>
+            <td style="font-size:13px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                title="${r.site_name||''}">${r.site_name||'—'}</td>
+            <td>${statusBadge(r.status)}</td>
+            <td class="log-message" title="${r.message||''}">${r.message||'—'}</td>
+            <td class="log-details" title="${r.details||''}">${r.details||'—'}</td>
+        </tr>`).join('');
+    } catch(e) {
+        showToast('Loglar yüklenemedi: '+e.message,'error');
+    }
+}
+
+async function clearLogs() {
+    if (!confirm('Tüm sistem logları silinecek. Emin misiniz?')) return;
+    await api('DELETE','/logs/api');
+    showToast('Loglar temizlendi','success');
+    refreshLogs();
+}
+
+/* ── B2B çekim geçmişi ──────────────────────────────────────────────────── */
+async function initHistorySites() {
+    try {
+        const sites = await api('GET','/panel1/api/status');
+        const sel   = document.getElementById('h-site');
+        sites.forEach(s => {
+            const o = document.createElement('option');
+            o.value = s.id; o.textContent = s.name;
+            sel.appendChild(o);
+        });
+    } catch {}
+}
+
+async function loadHistory() {
+    const siteId = document.getElementById('h-site').value;
+    const tb     = document.querySelector('#h-table tbody');
+
+    if (!siteId) {
+        tb.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px">Yukarıdan site seçin</td></tr>';
+        return;
+    }
+
+    const rows = await api('GET', `/panel1/api/history/${siteId}`);
+    if (!rows.length) {
+        tb.innerHTML = '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px">Çekim geçmişi yok</td></tr>';
+        return;
+    }
+
+    const tBadge = t => t==='auto'
+        ?'<span class="badge badge-info">Otomatik</span>'
+        :'<span class="badge badge-neutral">Manuel</span>';
+    const sBadge = s => ({
+        success:'<span class="badge badge-success">✓</span>',
+        error:  '<span class="badge badge-error">✗ Hata</span>',
+    }[s]||s);
+
+    tb.innerHTML = rows.map(r=>`<tr>
+        <td style="font-size:12px;white-space:nowrap">${r.scraped_at}</td>
+        <td>${r.site_name}</td>
+        <td>${tBadge(r.trigger_type)}</td>
+        <td>${sBadge(r.status)}</td>
+        <td><b>${r.product_count||0}</b> ürün</td>
+        <td class="log-details" title="${r.error_msg||''}">${r.error_msg?'⚠ '+r.error_msg.substring(0,50):'—'}</td>
+        <td>${r.output_file?`<a href="/panel1/api/download/${r.site_id}" class="btn btn-success btn-sm">↓ Excel</a>`:'—'}</td>
+    </tr>`).join('');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    refreshLogs();
+    initHistorySites();
+});
+setInterval(refreshLogs, 60000);
+</script>
+{% endblock %}

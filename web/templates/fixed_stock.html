@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% set active = "fixed_stock" %}
+{% block title %}Sabit Stok{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Sabit Stok</h1>
+        <p class="text-muted">
+            Endüstriyel Market deposundaki sabit stoklar. Her B2B çekiminde,
+            o ürünün EM kodu eşleşmişse <b>final stok = B2B stok + sabit stok</b> olur.
+        </p>
+    </div>
+</div>
+
+<!-- ── Yükleme & İndirme ─────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">📤 Excel İşlemleri</span>
+    </div>
+    <div style="padding:8px 4px">
+        <p style="margin:0 0 12px 0;color:#475569;font-size:14px">
+            <b>Format:</b> 2 sütun — 1. sütun <code>EM Kodu</code>, 2. sütun <code>Sabit Stok</code> (tam sayı).
+            Header satırı atlanır. <b>Yeni yükleme eskisini tamamen siler.</b>
+        </p>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <a class="btn btn-secondary" href="/settings/api/fixed-stock/template" download>
+                📥 Boş Şablon İndir
+            </a>
+            <a class="btn btn-secondary" href="/settings/api/fixed-stock/download" download>
+                📊 Dolu Excel İndir
+            </a>
+            <input type="file" id="fs-file" accept=".xlsx,.xlsm"
+                   style="display:none" onchange="uploadFS(this)">
+            <button class="btn btn-primary" onclick="document.getElementById('fs-file').click()">
+                📤 Excel Yükle
+            </button>
+            <button class="btn btn-danger" onclick="clearFS()">
+                🗑 Tümünü Sil
+            </button>
+            <span id="fs-status" style="color:#64748b;font-size:13px"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Özet ──────────────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">📊 Özet</span>
+    </div>
+    <div style="padding:8px 4px;display:flex;gap:24px;flex-wrap:wrap">
+        <div>
+            <div style="color:#64748b;font-size:12px">Toplam Ürün</div>
+            <div style="font-size:28px;font-weight:700;color:#0f172a">{{ summary.count }}</div>
+        </div>
+        <div>
+            <div style="color:#64748b;font-size:12px">Toplam Adet</div>
+            <div style="font-size:28px;font-weight:700;color:#15803d">{{ summary.total_qty }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Manuel Ekle/Düzenle ──────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">✏️ Manuel Ekle / Güncelle</span>
+    </div>
+    <div style="padding:8px 4px">
+        <p style="margin:0 0 10px 0;color:#475569;font-size:13px">
+            Tek bir ürün için hızlı ekleme/güncelleme. Mevcut EM kodu varsa stok değeri üzerine yazılır.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="row-em" placeholder="EM Kodu" class="form-input"
+                   style="max-width:240px">
+            <input type="number" id="row-qty" placeholder="Sabit Stok" class="form-input"
+                   min="0" style="max-width:140px">
+            <button class="btn btn-primary" onclick="saveRow()">💾 Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Mevcut Kayıtlar ──────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">📋 Mevcut Sabit Stoklar ({{ rows|length }})</span>
+    </div>
+    <div style="padding:8px 4px;max-height:540px;overflow-y:auto">
+        {% if rows %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>EM Kodu</th>
+                    <th style="text-align:right">Sabit Stok</th>
+                    <th>Güncelleme</th>
+                    <th style="text-align:right">İşlem</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in rows %}
+                <tr>
+                    <td><code>{{ r.em_code }}</code></td>
+                    <td style="text-align:right;font-weight:600;color:#15803d">{{ r.qty }}</td>
+                    <td style="color:#64748b;font-size:12px">{{ r.updated_at }}</td>
+                    <td style="text-align:right">
+                        <button class="btn btn-sm btn-danger"
+                                onclick="deleteRow('{{ r.em_code }}')">Sil</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:#64748b;text-align:center;padding:24px 0">
+            Henüz sabit stok eklenmedi.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function uploadFS(inp) {
+    const file = inp.files[0];
+    if (!file) return;
+    const status = document.getElementById('fs-status');
+    status.textContent = '⏳ Yükleniyor...';
+    status.style.color = '#64748b';
+
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const r = await fetch('/settings/api/fixed-stock/upload', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok) {
+            status.textContent = '❌ ' + (d.error || 'Yükleme başarısız');
+            status.style.color = '#dc2626';
+            return;
+        }
+        let msg = `✓ ${d.saved} kayıt yazıldı`;
+        if (d.skipped && d.skipped.length) {
+            msg += ` (${d.skipped.length} atlandı)`;
+        }
+        status.textContent = msg;
+        status.style.color = '#16a34a';
+        setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+        status.textContent = '❌ ' + e.message;
+        status.style.color = '#dc2626';
+    } finally {
+        inp.value = '';
+    }
+}
+
+async function clearFS() {
+    if (!confirm('Tüm sabit stok kayıtları silinecek. Emin misin?')) return;
+    const r = await fetch('/settings/api/fixed-stock', { method: 'DELETE' });
+    if (r.ok) location.reload();
+}
+
+async function saveRow() {
+    const em  = document.getElementById('row-em').value.trim();
+    const qty = document.getElementById('row-qty').value;
+    if (!em) { alert('EM kodu boş olamaz.'); return; }
+    if (qty === '' || Number(qty) < 0) { alert('Geçerli bir stok girin.'); return; }
+
+    const r = await fetch('/settings/api/fixed-stock/row', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ em_code: em, qty: Number(qty) }),
+    });
+    if (r.ok) {
+        location.reload();
+    } else {
+        const d = await r.json();
+        alert('Hata: ' + (d.error || 'bilinmiyor'));
+    }
+}
+
+async function deleteRow(em) {
+    if (!confirm(`'${em}' silinsin mi?`)) return;
+    const r = await fetch('/settings/api/fixed-stock/row/' + encodeURIComponent(em), {
+        method: 'DELETE'
+    });
+    if (r.ok) location.reload();
+}
+</script>
+{% endblock %}

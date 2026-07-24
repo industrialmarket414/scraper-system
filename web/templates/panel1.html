@@ -1,0 +1,493 @@
+{% extends "base.html" %}
+{% set active = "panel1" %}
+{% block title %}B2B Stok Scraper{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>B2B Stok Scraper</h1>
+    <p class="text-muted">Soldaki listeden site seçin, sağda veri çekin</p>
+</div>
+
+{% if sites %}
+<div class="panel1-wrap">
+    <!-- Sol: site listesi -->
+    <div class="p1-left">
+        <div class="p1-left-hdr">B2B Siteler</div>
+        {% for site in sites %}
+        <div class="site-row {% if loop.first %}active{% endif %}"
+             id="srow-{{ site.id }}" data-id="{{ site.id }}"
+             onclick="selectSite('{{ site.id }}')">
+            <div class="logo-wrap logo-wrap-sm">
+                {% if site.get('logo_url') %}
+                <img src="{{ site.logo_url }}" alt=""
+                     onerror="this.style.display='none';this.nextSibling.style.display='flex'">
+                <div class="logo-initial logo-initial-sm" style="display:none">{{ site.name[0]|upper }}</div>
+                {% else %}
+                <div class="logo-initial logo-initial-sm">{{ site.name[0]|upper }}</div>
+                {% endif %}
+            </div>
+            <div class="site-row-info">
+                <div class="site-row-name">{{ site.name }}</div>
+                <div class="site-row-sub" id="sub-{{ site.id }}">{{ site.last_run }}</div>
+            </div>
+            <span class="sdot sdot-{{ site.last_status }}" id="dot-{{ site.id }}"></span>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Sağ: detay -->
+    <div class="p1-right" id="p1-detail">
+        <div class="p1-empty">
+            <div class="p1-empty-icon">👈</div>
+            <p>Soldaki listeden bir site seçin</p>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <div class="empty-state">
+        <div class="empty-icon">📦</div>
+        <p>Henüz B2B sitesi eklenmemiş.</p>
+        <a href="/settings" class="btn btn-primary" style="margin-top:14px">⚙ Ayarlara Git</a>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── Modal: Kimlik & Logo ────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-creds">
+    <div class="modal" style="max-width:440px">
+        <div class="modal-header">
+            <span class="modal-title" id="creds-title">Site Ayarları</span>
+            <button class="modal-close" onclick="closeModal('modal-creds')">✕</button>
+        </div>
+        <input type="hidden" id="creds-site-id">
+        <div data-tabs>
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="ctab-creds">🔑 Kimlik</button>
+                <button class="tab-btn" data-tab="ctab-logo">🖼 Logo</button>
+            </div>
+            <div id="ctab-creds" class="tab-panel active">
+                <div class="form-group">
+                    <label class="form-label">Kullanıcı Adı / E-posta</label>
+                    <input type="text" class="form-input" id="creds-username"
+                           autocomplete="username" placeholder="kullanici@site.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Şifre</label>
+                    <div style="position:relative">
+                        <input type="password" class="form-input" id="creds-password"
+                               autocomplete="current-password" placeholder="••••••••"
+                               style="padding-right:75px">
+                        <button type="button" onclick="togglePw()"
+                                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);
+                                       background:none;border:none;cursor:pointer;font-size:12px;
+                                       color:var(--text-2)">Göster</button>
+                    </div>
+                </div>
+            </div>
+            <div id="ctab-logo" class="tab-panel">
+                <div class="form-group">
+                    <label class="form-label">Mevcut Logo</label>
+                    <div id="current-logo-preview"
+                         style="display:flex;align-items:center;gap:12px;padding:12px;
+                                background:var(--surface-2);border-radius:var(--r-sm);
+                                border:1px solid var(--border)">
+                        <div class="logo-wrap" id="logo-preview-wrap">
+                            <div class="logo-initial">?</div>
+                        </div>
+                        <span id="logo-preview-url" class="text-muted" style="font-size:12px">Logo yok</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Dosyadan Yükle</label>
+                    <input type="file" class="form-input" id="logo-file"
+                           accept="image/*" onchange="previewLogoFile(this)">
+                    <div class="form-hint">Eski logo otomatik silinir.</div>
+                </div>
+                <div style="text-align:center;color:var(--text-3);font-size:12px;margin:4px 0">— veya URL girin —</div>
+                <div class="form-group">
+                    <input type="url" class="form-input" id="logo-url-inp"
+                           placeholder="https://site.com/logo.png"
+                           oninput="previewLogoUrl(this.value)">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-creds')">İptal</button>
+            <button class="btn btn-primary" onclick="saveSiteSettings()">💾 Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Modal: Mail Gönder ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-mail">
+    <div class="modal" style="max-width:480px">
+        <div class="modal-header">
+            <span class="modal-title" id="mail-title">Mail Gönder</span>
+            <button class="modal-close" onclick="closeModal('modal-mail')">✕</button>
+        </div>
+        <input type="hidden" id="mail-site-id">
+        <div class="form-group">
+            <div class="flex-between mb-8">
+                <label class="form-label" style="margin:0">Alıcılar</label>
+                <button class="btn btn-ghost btn-sm" id="toggle-all-btn"
+                        onclick="toggleAllMails()">☑ Tümünü Seç</button>
+            </div>
+            <div id="mail-checkboxes"
+                 style="border:1px solid var(--border);border-radius:var(--r-sm);
+                        max-height:220px;overflow-y:auto">
+                <div class="text-muted" style="padding:16px;font-size:13px;text-align:center">Yükleniyor...</div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Mail Ekle</label>
+            <div class="chip-add-row">
+                <input type="email" class="form-input" id="mail-new-inp"
+                       placeholder="yeni@mail.com"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();addMailItem()}">
+                <button class="btn btn-primary btn-sm" onclick="addMailItem()">+ Ekle</button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-mail')">İptal</button>
+            <button class="btn btn-primary" id="mail-send-btn"
+                    onclick="sendSelectedMails()">✉ Seçilenlere Gönder</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── CSS ───────────────────────────────────────────────────────────────────── */
+document.head.insertAdjacentHTML('beforeend', `<style>
+.sdot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0}
+.sdot-success{background:var(--success)}
+.sdot-error{background:var(--error)}
+.sdot-running{background:#f59e0b;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+.running-bar{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 14px;background:#fef9c3;border:1px solid #fde047;
+    border-radius:var(--r-sm);margin-bottom:14px;font-size:13px;
+}
+.running-bar .spinner{width:14px;height:14px;border-width:2px}
+</style>`);
+
+/* ── Durum ─────────────────────────────────────────────────────────────────── */
+let _runningIds = new Set();
+let _currentSiteId = null;
+
+const stBadge  = s => ({
+    success:'<span class="badge badge-success">✓ Başarılı</span>',
+    error:  '<span class="badge badge-error">✗ Hata</span>',
+}[s] || '<span class="badge badge-neutral">— Henüz çalışmadı</span>');
+const trgBadge = t => t==='auto'?'<span class="badge badge-info">Otomatik</span>':'<span class="badge badge-neutral">Manuel</span>';
+
+function logoHtml(site) {
+    const l = (site.name||'?')[0].toUpperCase();
+    const img = site.logo_url
+        ? `<img src="${site.logo_url}" onerror="this.style.display='none';this.nextSibling.style.display='flex'">
+           <div class="logo-initial" style="display:none">${l}</div>`
+        : `<div class="logo-initial">${l}</div>`;
+    return `<div class="logo-wrap">${img}</div>`;
+}
+
+/* ── Site seç ──────────────────────────────────────────────────────────────── */
+async function selectSite(id) {
+    _currentSiteId = id;
+    document.querySelectorAll('.site-row').forEach(r=>r.classList.remove('active'));
+    document.getElementById('srow-'+id)?.classList.add('active');
+    const det = document.getElementById('p1-detail');
+    det.innerHTML = '<div class="progress-row"><span class="spinner"></span> Yükleniyor...</div>';
+    try {
+        const [statuses, history] = await Promise.all([
+            api('GET','/panel1/api/status'),
+            api('GET',`/panel1/api/history/${id}`)
+        ]);
+        const site = statuses.find(s=>s.id===id)||{id,name:id,last_status:'-',last_run:'—'};
+        det.innerHTML = buildDetail(site, history);
+    } catch(e) {
+        det.innerHTML = `<div class="empty-state"><p class="text-error">Yüklenemedi: ${e.message}</p></div>`;
+    }
+}
+
+function buildDetail(site, history) {
+    const isRun = _runningIds.has(site.id);
+
+    const hRows = history.length ? history.map(h=>`<tr>
+        <td style="font-size:12px;white-space:nowrap">${h.scraped_at}</td>
+        <td>${trgBadge(h.trigger_type)}</td><td>${stBadge(h.status)}</td>
+        <td>${h.product_count||0} ürün</td>
+        <td>${h.error_msg?`<span class="text-error" style="font-size:11px" title="${h.error_msg}">⚠ Hata</span>`:'—'}</td>
+        <td>${h.output_file?`<a href="/panel1/api/download/${site.id}" class="btn btn-success btn-sm">↓ Excel</a>`:'—'}</td>
+    </tr>`).join('')
+    : '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:20px">Henüz çekim yapılmamış</td></tr>';
+
+    const runningBar = isRun ? `
+        <div class="running-bar">
+            <span class="spinner"></span>
+            <span><b>${site.name}</b> şu an çekiyor...</span>
+            <button class="btn btn-danger btn-sm" style="margin-left:auto"
+                    onclick="stopSite('${site.id}', this)">⏹ Durdur</button>
+        </div>` : '';
+
+    const actionBtn = isRun
+        ? `<button class="btn btn-danger" onclick="stopSite('${site.id}',this)">⏹ Durdur</button>`
+        : `<button class="btn btn-primary" id="run-btn-${site.id}" onclick="runSite('${site.id}',this)">▶ Veri Çek</button>`;
+
+    return `
+    ${runningBar}
+    <div class="flex-between mb-16" style="flex-wrap:wrap;gap:10px">
+        <div class="flex gap-8" style="align-items:center">
+            ${logoHtml(site)}
+            <div>
+                <h2 style="font-size:18px;font-weight:700">${site.name}</h2>
+                <div class="flex gap-8" style="margin-top:4px;align-items:center;flex-wrap:wrap">
+                    ${stBadge(site.last_status)}
+                    <span class="text-muted" style="font-size:12px">Son: ${site.last_run}</span>
+                </div>
+            </div>
+        </div>
+        <button class="btn btn-ghost btn-sm"
+                onclick="openCreds('${site.id}','${site.name}','${site.logo_url||''}')">🔑 Ayarlar</button>
+    </div>
+    <div class="flex gap-8 mb-20" style="flex-wrap:wrap">
+        ${actionBtn}
+        <button class="btn btn-ghost" onclick="openMailModal('${site.id}','${site.name}')">✉ Mail Gönder</button>
+    </div>
+    <div class="section-label">Çekim Geçmişi (Son 30)</div>
+    <div class="card">
+        <div class="table-container">
+            <table><thead><tr><th>Tarih</th><th>Tür</th><th>Durum</th><th>Ürün</th><th>Hata</th><th>Dosya</th></tr></thead>
+            <tbody>${hRows}</tbody></table>
+        </div>
+    </div>`;
+}
+
+/* ── Veri çek ──────────────────────────────────────────────────────────────── */
+async function runSite(id, btn) {
+    btn.disabled=true; btn.textContent='⏳ Başlatılıyor...';
+    try {
+        await api('POST', `/panel1/api/run/${id}`);
+        showToast('Çekim başlatıldı','info');
+        setTimeout(()=>{ if(_currentSiteId===id) selectSite(id); refreshAll(); }, 1500);
+    } catch(e) {
+        // 409 = zaten çalışıyor
+        showToast(e.message||'Hata', e.message?.includes('çekiyor')?'info':'error');
+        btn.disabled=false; btn.textContent='▶ Veri Çek';
+    }
+}
+
+/* ── Durdur ────────────────────────────────────────────────────────────────── */
+async function stopSite(id, btn) {
+    if (!confirm('Çekim işlemi durdurulacak. Emin misiniz?')) return;
+    btn.disabled=true; btn.textContent='⏳ Durduruluyor...';
+    try {
+        await api('DELETE', `/panel1/api/run/${id}`);
+        showToast('Çekim durduruldu','success');
+        setTimeout(()=>{ if(_currentSiteId===id) selectSite(id); refreshAll(); }, 1000);
+    } catch(e) {
+        showToast('Hata: '+e.message,'error');
+        btn.disabled=false; btn.textContent='⏹ Durdur';
+    }
+}
+
+/* ── Periyodik güncelleme ──────────────────────────────────────────────────── */
+async function refreshAll() {
+    try {
+        const statuses = await api('GET', '/panel1/api/status');
+        const newRunning = new Set(statuses.filter(s=>s.running).map(s=>s.id));
+        const changed = [...newRunning].some(id=>!_runningIds.has(id)) ||
+                        [..._runningIds].some(id=>!newRunning.has(id));
+
+        _runningIds = newRunning;
+
+        statuses.forEach(s => {
+            const sub = document.getElementById('sub-'+s.id);
+            if (sub) sub.textContent = s.last_run;
+
+            const dot = document.getElementById('dot-'+s.id);
+            if (dot) {
+                dot.className = s.running
+                    ? 'sdot sdot-running'
+                    : `sdot sdot-${s.last_status}`;
+            }
+        });
+
+        // Detay panelini yenile (durum değiştiyse)
+        if (changed && _currentSiteId) {
+            const site = statuses.find(s=>s.id===_currentSiteId);
+            if (site) {
+                const history = await api('GET', `/panel1/api/history/${_currentSiteId}`);
+                document.getElementById('p1-detail').innerHTML =
+                    buildDetail(site, history);
+            }
+        }
+    } catch {}
+}
+
+setInterval(refreshAll, 2500);
+
+/* ── Kimlik + Logo modalı ──────────────────────────────────────────────────── */
+function openCreds(id, name, logoUrl) {
+    document.getElementById('creds-site-id').value = id;
+    document.getElementById('creds-title').textContent = `Ayarlar — ${name}`;
+    document.getElementById('creds-username').value = '';
+    document.getElementById('creds-password').value = '';
+    document.getElementById('logo-file').value = '';
+    document.getElementById('logo-url-inp').value = logoUrl || '';
+    const wrap = document.getElementById('logo-preview-wrap');
+    const urlSpan = document.getElementById('logo-preview-url');
+    if (logoUrl) {
+        wrap.innerHTML = `<img src="${logoUrl}" style="width:100%;height:100%;object-fit:contain"
+                              onerror="this.parentElement.innerHTML='<div class=logo-initial>${name[0].toUpperCase()}</div>'">`;
+        urlSpan.textContent = logoUrl;
+    } else {
+        wrap.innerHTML = `<div class="logo-initial">${name[0].toUpperCase()}</div>`;
+        urlSpan.textContent = 'Logo yok';
+    }
+    openModal('modal-creds');
+}
+
+function togglePw() {
+    const inp = document.getElementById('creds-password');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+function previewLogoFile(input) {
+    if (!input.files.length) return;
+    const url = URL.createObjectURL(input.files[0]);
+    document.getElementById('logo-preview-wrap').innerHTML =
+        `<img src="${url}" style="width:100%;height:100%;object-fit:contain">`;
+    document.getElementById('logo-url-inp').value = '';
+}
+function previewLogoUrl(url) {
+    if (!url) return;
+    document.getElementById('logo-preview-wrap').innerHTML =
+        `<img src="${url}" style="width:100%;height:100%;object-fit:contain"
+              onerror="this.parentElement.innerHTML='<div class=logo-initial>?</div>'">`;
+    document.getElementById('logo-file').value = '';
+}
+
+async function saveSiteSettings() {
+    const id   = document.getElementById('creds-site-id').value;
+    const user = document.getElementById('creds-username').value.trim();
+    const pass = document.getElementById('creds-password').value;
+    if (user || pass) {
+        const updates = {};
+        if (user) updates.username = user;
+        if (pass) updates.password = pass;
+        try { await api('POST', `/panel1/api/site/${id}/settings`, updates); }
+        catch(e) { showToast('Kimlik kaydedilemedi: '+e.message,'error'); return; }
+    }
+    const fileInput = document.getElementById('logo-file');
+    const urlInput  = document.getElementById('logo-url-inp').value.trim();
+    if (fileInput.files.length) {
+        const fd = new FormData();
+        fd.append('logo', fileInput.files[0]);
+        try {
+            const res = await fetch(`/panel1/api/site/${id}/logo`, {method:'POST',body:fd});
+            const r = await res.json();
+            if (!res.ok) { showToast(r.error,'error'); return; }
+            updateSidebarLogo(id, r.logo_url);
+        } catch(e) { showToast('Logo yüklenemedi: '+e.message,'error'); return; }
+    } else if (urlInput) {
+        try {
+            await api('POST', `/panel1/api/site/${id}/settings`, {logo_url: urlInput});
+            updateSidebarLogo(id, urlInput);
+        } catch(e) { showToast('Logo URL kaydedilemedi: '+e.message,'error'); return; }
+    }
+    closeModal('modal-creds');
+    showToast('Ayarlar kaydedildi ✓','success');
+}
+
+function updateSidebarLogo(siteId, logoUrl) {
+    const row = document.getElementById('srow-'+siteId);
+    if (!row) return;
+    const wrap = row.querySelector('.logo-wrap');
+    if (!wrap) return;
+    const letter = row.querySelector('.site-row-name')?.textContent[0]?.toUpperCase() || '?';
+    wrap.innerHTML = `<img src="${logoUrl}" style="width:100%;height:100%;object-fit:contain"
+                          onerror="this.style.display='none';this.nextSibling.style.display='flex'">
+                     <div class="logo-initial logo-initial-sm" style="display:none">${letter}</div>`;
+}
+
+/* ── Mail modalı ───────────────────────────────────────────────────────────── */
+let _mailList = [];
+
+async function openMailModal(id, name) {
+    document.getElementById('mail-site-id').value = id;
+    document.getElementById('mail-title').textContent = `Mail Gönder — ${name}`;
+    document.getElementById('mail-checkboxes').innerHTML =
+        '<div class="text-muted" style="padding:16px;text-align:center">Yükleniyor...</div>';
+    openModal('modal-mail');
+    const cfg = await api('GET', '/settings/api');
+    _mailList  = [...(cfg.email.recipients || [])];
+    renderMailList();
+}
+
+function renderMailList() {
+    const el = document.getElementById('mail-checkboxes');
+    if (!_mailList.length) {
+        el.innerHTML = '<div class="text-muted" style="padding:16px;font-size:13px;text-align:center">Mail adresi eklenmemiş</div>';
+        return;
+    }
+    el.innerHTML = _mailList.map((m,i)=>`
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+                    border-bottom:1px solid var(--border-light)">
+            <input type="checkbox" id="mc-${i}" checked
+                   style="width:15px;height:15px;accent-color:var(--accent);flex-shrink:0">
+            <label for="mc-${i}" style="flex:1;font-size:13px;cursor:pointer">${m}</label>
+            <button onclick="removeMailItem(${i})"
+                    style="background:none;border:none;cursor:pointer;color:var(--text-3);
+                           font-size:18px;line-height:1;padding:2px 6px">×</button>
+        </div>`).join('');
+    updateToggleBtn();
+}
+
+function updateToggleBtn() {
+    const cbs = [...document.querySelectorAll('#mail-checkboxes input[type=checkbox]')];
+    const btn = document.getElementById('toggle-all-btn');
+    if (btn) btn.textContent = cbs.length && cbs.every(c=>c.checked) ? '☐ Tümünü Kaldır' : '☑ Tümünü Seç';
+}
+function toggleAllMails() {
+    const cbs = [...document.querySelectorAll('#mail-checkboxes input[type=checkbox]')];
+    const all = cbs.every(c=>c.checked);
+    cbs.forEach(c=>c.checked=!all);
+    updateToggleBtn();
+}
+function addMailItem() {
+    const inp = document.getElementById('mail-new-inp');
+    const val = inp.value.trim();
+    if (!val||!val.includes('@')) { showToast('Geçerli bir e-posta girin','error'); return; }
+    if (_mailList.includes(val))  { showToast('Bu adres zaten listede','error');    return; }
+    _mailList.push(val); inp.value=''; renderMailList();
+}
+function removeMailItem(i) { _mailList.splice(i,1); renderMailList(); }
+document.addEventListener('change', e => { if (e.target.closest('#mail-checkboxes')) updateToggleBtn(); });
+
+async function sendSelectedMails() {
+    const selected = _mailList.filter((_,i) => document.getElementById(`mc-${i}`)?.checked);
+    if (!selected.length) { showToast('En az bir alıcı seçin','error'); return; }
+    const btn = document.getElementById('mail-send-btn');
+    btn.disabled=true; btn.textContent='⏳ Gönderiliyor...';
+    try {
+        const cfg = await api('GET','/settings/api');
+        cfg.email.recipients = [..._mailList];
+        await api('POST','/settings/api',cfg);
+        await api('POST',`/panel1/api/mail/${document.getElementById('mail-site-id').value}`,{recipients:selected});
+        closeModal('modal-mail');
+        showToast(`${selected.length} adrese mail gönderildi ✓`,'success');
+    } catch(e) { showToast('Hata: '+e.message,'error'); }
+    finally { btn.disabled=false; btn.textContent='✉ Seçilenlere Gönder'; }
+}
+
+/* ── Başlangıç ─────────────────────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', async () => {
+    await refreshAll();  // running durumunu hemen çek
+    const first = document.querySelector('.site-row');
+    if (first) selectSite(first.dataset.id);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,741 @@
+{% extends "base.html" %}
+{% set active = "settings" %}
+{% block title %}Ayarlar{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <div><h1>Ayarlar</h1><p class="text-muted">E-posta, AI ve site ayarları</p></div>
+    <button class="btn btn-primary" onclick="saveAll()">💾 Kaydet</button>
+</div>
+
+<div data-tabs>
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="t-email">E-posta</button>
+        <button class="tab-btn" data-tab="t-ai">AI Ayarları</button>
+        <button class="tab-btn" data-tab="t-schedule">B2B Zaman Döngüsü</button>
+        <button class="tab-btn" data-tab="t-b2b">B2B Siteleri</button>
+        <button class="tab-btn" data-tab="t-price">Fiyat Siteleri</button>
+    </div>
+
+    <!-- E-posta -->
+    <div id="t-email" class="tab-panel active">
+        <div class="card">
+            <div class="card-header"><span class="card-title">Gmail SMTP</span></div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">Gönderici E-posta</label>
+                    <input type="email" class="form-input" id="sender_email"
+                           value="{{ settings.email.sender_email }}" placeholder="ornek@gmail.com">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Uygulama Şifresi (App Password)</label>
+                    <input type="password" class="form-input" id="sender_password"
+                           value="{{ settings.email.sender_password }}" placeholder="xxxx xxxx xxxx xxxx">
+                    <div class="form-hint">Gmail → Güvenlik → 2 Adımlı Doğrulama → Uygulama Şifreleri</div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label">SMTP Host</label>
+                    <input type="text" class="form-input" id="smtp_host" value="{{ settings.email.smtp_host }}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Port</label>
+                    <input type="number" class="form-input" id="smtp_port" value="{{ settings.email.smtp_port }}">
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:4px">
+                <div class="form-hint">
+                    Mail listelerini yönetmek için →
+                    <a href="/settings/mail-lists" style="color:var(--accent)">Mail Listeleri sayfasına gidin</a>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="openTestMailModal()">✉ Test Maili Gönder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI -->
+    <div id="t-ai" class="tab-panel">
+        <div class="card">
+            <div class="card-header"><span class="card-title">Claude AI Ayarları</span></div>
+            <div class="form-group">
+                <label class="form-label">Claude API Anahtarı</label>
+                <input type="password" class="form-input" id="claude_api_key"
+                       value="{{ settings.claude_api_key }}" placeholder="sk-ant-...">
+                <div class="form-hint">
+                    <a href="https://console.anthropic.com" target="_blank"
+                       style="color:var(--accent)">console.anthropic.com</a>
+                    → API Keys bölümünden alın. Panel 2 → AI Analiz sekmesi için gereklidir.
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Model</label>
+                <select class="form-select" id="claude_model" style="max-width:320px">
+                    <option value="claude-sonnet-4-5"
+                            {% if settings.claude_model=='claude-sonnet-4-5' %}selected{% endif %}>
+                        claude-sonnet-4-5 — Önerilen (hız/kalite dengesi)
+                    </option>
+                    <option value="claude-opus-4-5"
+                            {% if settings.claude_model=='claude-opus-4-5' %}selected{% endif %}>
+                        claude-opus-4-5 — En güçlü (yavaş)
+                    </option>
+                    <option value="claude-haiku-4-5"
+                            {% if settings.claude_model=='claude-haiku-4-5' %}selected{% endif %}>
+                        claude-haiku-4-5 — En hızlı ve ekonomik
+                    </option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- B2B Zaman Döngüsü -->
+    <div id="t-schedule" class="tab-panel">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">B2B Zaman Döngüsü</span>
+                <span class="badge badge-info" id="sched-status-badge">Yükleniyor...</span>
+            </div>
+
+            <!-- Saatler -->
+            <div class="form-group">
+                <label class="form-label">Çalışma Saati(leri)</label>
+                <div id="time-slots" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+                <button class="btn btn-ghost btn-sm" id="add-time-btn" onclick="addTimeSlot()">
+                    + İkinci Saat Ekle
+                </button>
+                <div class="form-hint">Her gün belirtilen saatlerde otomatik çekim başlar</div>
+            </div>
+
+            <!-- Hangi siteler -->
+            <div class="form-group">
+                <label class="form-label">Hangi B2B Siteleri Çekilsin</label>
+                <div id="sched-site-list"
+                     style="border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden"></div>
+                <div class="flex gap-8" style="margin-top:8px">
+                    <button class="btn btn-ghost btn-sm" onclick="selectAllSchedSites(true)">Tümünü Seç</button>
+                    <button class="btn btn-ghost btn-sm" onclick="selectAllSchedSites(false)">Tümünü Kaldır</button>
+                </div>
+            </div>
+
+            <!-- Toplu saatten ayrılan uzun görevler -->
+            <div class="form-group">
+                <label class="form-label">Özel Site Saatleri</label>
+                <div id="special-schedule-list"
+                     style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+                <button class="btn btn-ghost btn-sm" type="button"
+                        onclick="addSpecialSchedule()">
+                    + Özel Saat Ekle
+                </button>
+                <div class="form-hint">
+                    Buradaki siteler toplu çekime girmez; yalnızca kendi saatlerinde çalışır.
+                </div>
+            </div>
+
+            <!-- Toplu mail -->
+            <div class="form-group">
+                <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer">
+                    <input type="checkbox" id="combined-mail" checked
+                           style="width:15px;height:15px;accent-color:var(--accent);margin-top:2px;flex-shrink:0">
+                    <div>
+                        <span class="form-label" style="margin:0">Toplu Mail Gönderimi</span>
+                        <div class="form-hint">
+                            Tüm çekimler bittikten sonra tek bir özet mail gönderilir —
+                            "NOAS: 247 ürün, Kıraç: 350 ürün..." şeklinde
+                        </div>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- Fiyat tarama -->
+        <div class="card mt-16">
+            <div class="card-header"><span class="card-title">Fiyat Tarama Döngüsü</span></div>
+            <div class="form-group">
+                <label class="form-label">Cron İfadesi</label>
+                <input type="text" class="form-input" id="price_schedule"
+                       value="{{ settings.price_schedule }}" style="max-width:260px">
+                <div class="form-hint">
+                    <code>0 */6 * * *</code> her 6 saat ·
+                    <code>0 8,20 * * *</code> 08:00 ve 20:00 ·
+                    <code>0 9 * * 1-5</code> hafta içi 09:00
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Site Başına Maksimum Kayıt</label>
+                <input type="number" class="form-input" id="price_max_records"
+                       value="{{ settings.price_max_records }}"
+                       style="max-width:100px" min="5" max="500">
+            </div>
+        </div>
+    </div>
+
+    <!-- B2B Siteleri -->
+    <div id="t-b2b" class="tab-panel">
+        <div class="flex-between mb-20">
+            <span class="text-muted" style="font-size:13px">
+                Her B2B sitesi için kaynak kodda scraper yazılması gerekir
+            </span>
+            <button class="btn btn-primary btn-sm" onclick="openAddB2B()">+ Site Ekle</button>
+        </div>
+        <div class="card" id="b2b-list"></div>
+    </div>
+
+    <!-- Fiyat Siteleri -->
+    <div id="t-price" class="tab-panel">
+        <div class="flex-between mb-20">
+            <span class="text-muted" style="font-size:13px">
+                Her fiyat sitesi için kaynak kodda scraper yazılması gerekir
+            </span>
+            <button class="btn btn-primary btn-sm" onclick="openAddPrice()">+ Site Ekle</button>
+        </div>
+        <div class="card" id="price-list"></div>
+    </div>
+</div>
+
+<!-- B2B Modal -->
+<div class="modal-overlay" id="modal-b2b">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title" id="b2b-modal-title">B2B Site Ekle</span>
+            <button class="modal-close" onclick="closeModal('modal-b2b')">✕</button>
+        </div>
+        <input type="hidden" id="b2b-edit-id">
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Site ID *</label>
+                <input type="text" class="form-input" id="b2b-id" placeholder="noas">
+                <div class="form-hint">@register_scraper("ID") ile eşleşmeli</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Site Adı *</label>
+                <input type="text" class="form-input" id="b2b-name" placeholder="NOAS">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">URL</label>
+            <input type="url" class="form-input" id="b2b-url">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Logo URL <span class="text-muted" style="font-weight:400">(isteğe bağlı)</span></label>
+            <div class="flex gap-8" style="align-items:center">
+                <input type="url" class="form-input" id="b2b-logo"
+                       oninput="prevLogo('b2b-logo','b2b-lp')">
+                <div class="logo-wrap" id="b2b-lp"><div class="logo-initial">?</div></div>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Kullanıcı Adı</label>
+                <input type="text" class="form-input" id="b2b-username">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Şifre</label>
+                <input type="password" class="form-input" id="b2b-password">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Marka Filtresi (virgülle)</label>
+            <input type="text" class="form-input" id="b2b-brands" placeholder="Samsung, LG">
+            <div class="form-hint">Boş = tüm ürünler çekilir</div>
+        </div>
+        <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="b2b-enabled" checked
+                       style="width:15px;height:15px;accent-color:var(--accent)">
+                <span class="form-label" style="margin:0">Aktif</span>
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-b2b')">İptal</button>
+            <button class="btn btn-primary" onclick="saveB2B()">Kaydet</button>
+        </div>
+    </div>
+</div>
+
+<!-- Fiyat Modal -->
+<div class="modal-overlay" id="modal-price">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title" id="price-modal-title">Fiyat Sitesi Ekle</span>
+            <button class="modal-close" onclick="closeModal('modal-price')">✕</button>
+        </div>
+        <input type="hidden" id="price-edit-id">
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Site ID *</label>
+                <input type="text" class="form-input" id="price-id">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Site Adı *</label>
+                <input type="text" class="form-input" id="price-name">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">URL</label>
+            <input type="url" class="form-input" id="price-url">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Logo URL</label>
+            <div class="flex gap-8" style="align-items:center">
+                <input type="url" class="form-input" id="price-logo"
+                       oninput="prevLogo('price-logo','price-lp')">
+                <div class="logo-wrap" id="price-lp"><div class="logo-initial">?</div></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="price-enabled" checked
+                       style="width:15px;height:15px;accent-color:var(--accent)">
+                <span class="form-label" style="margin:0">Aktif</span>
+            </label>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-price')">İptal</button>
+            <button class="btn btn-primary" onclick="savePrice()">Kaydet</button>
+        </div>
+    </div>
+</div>
+<!-- ── Modal: Test Maili ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-test-mail">
+    <div class="modal" style="max-width:420px">
+        <div class="modal-header">
+            <span class="modal-title">Test Maili Gönder</span>
+            <button class="modal-close" onclick="closeModal('modal-test-mail')">✕</button>
+        </div>
+        <p class="text-muted" style="font-size:13px;margin-bottom:14px">
+            Hangi adrese test maili göndermek istiyorsunuz?
+        </p>
+        <div id="s-test-options" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
+        <div id="s-custom-wrap" class="form-group" style="display:none">
+            <label class="form-label">Özel Adres</label>
+            <input type="email" class="form-input" id="s-custom-inp" placeholder="ozel@adres.com">
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-test-mail')">İptal</button>
+            <button class="btn btn-primary" id="s-test-send-btn" onclick="doTestMail()">Gönder</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let cfg = {{ settings | tojson }};
+
+/* ── Zamanlama UI ─────────────────────────────────────────────────────────── */
+function selectSched(type) {
+    ['daily','interval','range'].forEach(t => {
+        document.getElementById('sopt-'+t)?.classList.toggle('selected', t===type);
+        document.getElementById('sp-'+t).style.display = t===type ? 'block' : 'none';
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadB2BSchedUI();
+    renderB2B();
+    renderPrice();
+});
+
+/* ── B2B Zamanlama UI ──────────────────────────────────────────────────────── */
+function loadB2BSchedUI() {
+    const sched = cfg.b2b_schedule || {times: ['08:00'], enabled_sites: [], combined_mail: true};
+
+    // Saatleri yükle
+    const container = document.getElementById('time-slots');
+    if (container) {
+        container.innerHTML = '';
+        const times = (sched.times && sched.times.length) ? sched.times : ['08:00'];
+        times.forEach(t => _addTimeSlotEl(t));
+        _updateAddTimeBtn();
+    }
+
+    // Site checkboxları
+    renderSchedSiteList(sched.enabled_sites || []);
+    renderSpecialSchedules(sched.site_times || {});
+
+    // Toplu mail
+    const cb = document.getElementById('combined-mail');
+    if (cb) cb.checked = sched.combined_mail !== false;
+
+    // Badge
+    const badge = document.getElementById('sched-status-badge');
+    if (badge) {
+        const times2 = sched.times || [];
+        const specialCount = Object.keys(sched.site_times || {}).length;
+        badge.textContent = times2.length
+            ? times2.join(' ve ') + ' toplu' +
+              (specialCount ? ` · ${specialCount} özel` : '')
+            : (specialCount ? `${specialCount} özel zamanlama` : 'Zamanlama yok');
+    }
+}
+
+function addTimeSlot(time) {
+    const cnt = document.querySelectorAll('.time-slot').length;
+    if (cnt >= 2) { showToast('En fazla 2 saat ekleyebilirsiniz', 'error'); return; }
+    _addTimeSlotEl(time || '08:00');
+    _updateAddTimeBtn();
+}
+
+function _addTimeSlotEl(time) {
+    const container = document.getElementById('time-slots');
+    const cnt       = container.querySelectorAll('.time-slot').length;
+
+    const div = document.createElement('div');
+    div.className = 'time-slot flex gap-8';
+    div.style.alignItems = 'center';
+
+    div.innerHTML = `
+        <span class="text-muted" style="font-size:12px;min-width:70px">
+            ${cnt === 0 ? '1. çalışma:' : '2. çalışma:'}
+        </span>
+        <input type="time" class="form-input" value="${time}"
+               style="max-width:150px">
+        <button type="button"
+                style="background:none;border:none;cursor:pointer;color:var(--text-3);
+                       font-size:20px;line-height:1;padding:2px 6px"
+                title="Saati kaldır"
+                onclick="this.closest('.time-slot').remove(); _updateAddTimeBtn();">×</button>
+    `;
+    container.appendChild(div);
+}
+
+function _updateAddTimeBtn() {
+    const btn = document.getElementById('add-time-btn');
+    if (!btn) return;
+    const cnt = document.querySelectorAll('.time-slot').length;
+    btn.style.display = cnt >= 2 ? 'none' : 'inline-flex';
+    btn.textContent   = cnt === 0 ? '+ Saat Ekle' : '+ İkinci Saat Ekle';
+}
+
+function renderSchedSiteList(enabledIds) {
+    const el = document.getElementById('sched-site-list');
+    if (!el) return;
+    if (!cfg.b2b_sites.length) {
+        el.innerHTML = '<div class="text-muted" style="padding:12px;font-size:13px">Henüz B2B sitesi eklenmemiş</div>';
+        return;
+    }
+    el.innerHTML = cfg.b2b_sites.map((s, i) => {
+        const checked  = enabledIds.length === 0 || enabledIds.includes(s.id);
+        const isLast   = i === cfg.b2b_sites.length - 1;
+        return `
+        <label style="display:flex;align-items:center;gap:12px;padding:10px 14px;
+                       ${isLast ? '' : 'border-bottom:1px solid var(--border-light);'}
+                       cursor:pointer;transition:background .1s"
+               onmouseover="this.style.background='var(--surface-2)'"
+               onmouseout="this.style.background=''">
+            <input type="checkbox" data-site-id="${s.id}" ${checked ? 'checked' : ''}
+                   style="width:15px;height:15px;accent-color:var(--accent);flex-shrink:0">
+            <span style="font-size:13px;font-weight:500">${s.name}</span>
+            <span style="font-size:11px;color:var(--text-3);margin-left:auto">${s.id}</span>
+        </label>`;
+    }).join('');
+}
+
+function selectAllSchedSites(state) {
+    document.querySelectorAll('#sched-site-list input[type=checkbox]')
+        .forEach(cb => cb.checked = state);
+}
+
+function renderSpecialSchedules(siteTimes) {
+    const container = document.getElementById('special-schedule-list');
+    if (!container) return;
+    container.innerHTML = '';
+    Object.entries(siteTimes || {}).forEach(([siteId, configuredTimes]) => {
+        const times = Array.isArray(configuredTimes) ? configuredTimes : [configuredTimes];
+        times.filter(Boolean).forEach(time => _addSpecialScheduleEl(siteId, time));
+    });
+}
+
+function addSpecialSchedule(siteId, time) {
+    _addSpecialScheduleEl(siteId || '', time || '17:30');
+}
+
+function _addSpecialScheduleEl(siteId, time) {
+    const container = document.getElementById('special-schedule-list');
+    if (!container) return;
+    const row = document.createElement('div');
+    row.className = 'special-schedule-row flex gap-8';
+    row.style.alignItems = 'center';
+    const options = cfg.b2b_sites.map(site =>
+        `<option value="${site.id}" ${site.id === siteId ? 'selected' : ''}>${site.name}</option>`
+    ).join('');
+    row.innerHTML = `
+        <select class="form-input special-site" style="max-width:240px">${options}</select>
+        <input type="time" class="form-input special-time" value="${time}"
+               style="max-width:150px">
+        <button type="button"
+                style="background:none;border:none;cursor:pointer;color:var(--text-3);
+                       font-size:20px;line-height:1;padding:2px 6px"
+                title="Özel saati kaldır"
+                onclick="this.closest('.special-schedule-row').remove()">×</button>
+    `;
+    container.appendChild(row);
+}
+
+function getB2BSchedConfig() {
+    const times = [...document.querySelectorAll('.time-slot input[type=time]')]
+        .map(inp => inp.value).filter(Boolean);
+
+    const enabledSites = [...document.querySelectorAll('#sched-site-list input[type=checkbox]')]
+        .filter(cb => cb.checked)
+        .map(cb => cb.dataset.siteId);
+
+    const siteTimes = {};
+    document.querySelectorAll('.special-schedule-row').forEach(row => {
+        const siteId = row.querySelector('.special-site')?.value;
+        const time = row.querySelector('.special-time')?.value;
+        if (!siteId || !time) return;
+        if (!siteTimes[siteId]) siteTimes[siteId] = [];
+        if (!siteTimes[siteId].includes(time)) siteTimes[siteId].push(time);
+    });
+
+    return {
+        times,
+        enabled_sites: enabledSites,
+        combined_mail: document.getElementById('combined-mail')?.checked !== false,
+        site_times: siteTimes,
+    };
+}
+
+/* ── Logo önizleme ─────────────────────────────────────────────────────────── */
+function prevLogo(inpId, prevId) {
+    const url  = document.getElementById(inpId).value.trim();
+    const wrap = document.getElementById(prevId);
+    wrap.innerHTML = url
+        ? `<img src="${url}" onerror="this.parentElement.innerHTML='<div class=logo-initial>?</div>'">`
+        : '<div class="logo-initial">?</div>';
+}
+function logoHtml(s) {
+    const l = (s.name||'?')[0].toUpperCase();
+    return s.logo_url
+        ? `<div class="logo-wrap"><img src="${s.logo_url}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"><div class="logo-initial" style="display:none">${l}</div></div>`
+        : `<div class="logo-wrap"><div class="logo-initial">${l}</div></div>`;
+}
+
+/* ── B2B Listesi ───────────────────────────────────────────────────────────── */
+function renderB2B() {
+    const el = document.getElementById('b2b-list');
+    if (!cfg.b2b_sites.length) {
+        el.innerHTML='<div class="empty-state"><div class="empty-icon">📦</div><p>Henüz B2B sitesi eklenmemiş</p></div>'; return;
+    }
+    el.innerHTML = cfg.b2b_sites.map(s=>`
+        <div class="site-item">${logoHtml(s)}
+            <div class="site-info">
+                <h4>${s.name} <code style="font-size:10px">${s.id}</code></h4>
+                <p>${s.url||'—'}</p>
+            </div>
+            <div class="site-actions">
+                <span class="badge ${s.enabled!==false?'badge-success':'badge-neutral'}">${s.enabled!==false?'Aktif':'Pasif'}</span>
+                <button class="btn btn-ghost btn-sm" onclick="editB2B('${s.id}')">Düzenle</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteB2B('${s.id}')">Sil</button>
+            </div>
+        </div>`).join('');
+}
+
+function openAddB2B() {
+    document.getElementById('b2b-modal-title').textContent='B2B Site Ekle';
+    document.getElementById('b2b-edit-id').value='';
+    ['id','name','url','logo','username','password','brands'].forEach(f=>document.getElementById('b2b-'+f).value='');
+    document.getElementById('b2b-id').disabled=false;
+    document.getElementById('b2b-enabled').checked=true;
+    document.getElementById('b2b-lp').innerHTML='<div class="logo-initial">?</div>';
+    openModal('modal-b2b');
+}
+function editB2B(id) {
+    const s=cfg.b2b_sites.find(x=>x.id===id); if(!s) return;
+    document.getElementById('b2b-modal-title').textContent='B2B Site Düzenle';
+    document.getElementById('b2b-edit-id').value=id;
+    document.getElementById('b2b-id').value=s.id; document.getElementById('b2b-id').disabled=true;
+    document.getElementById('b2b-name').value=s.name||'';
+    document.getElementById('b2b-url').value=s.url||'';
+    document.getElementById('b2b-logo').value=s.logo_url||'';
+    document.getElementById('b2b-username').value=s.username||'';
+    document.getElementById('b2b-password').value=s.password||'';
+    document.getElementById('b2b-brands').value=(s.brands||[]).join(', ');
+    document.getElementById('b2b-enabled').checked=s.enabled!==false;
+    prevLogo('b2b-logo','b2b-lp'); openModal('modal-b2b');
+}
+function saveB2B() {
+    const id=document.getElementById('b2b-id').value.trim();
+    const name=document.getElementById('b2b-name').value.trim();
+    if(!id||!name){showToast('ID ve Ad zorunludur','error');return;}
+    const sc = getSchedConfig();
+    const site={id,name,url:document.getElementById('b2b-url').value.trim(),
+        logo_url:document.getElementById('b2b-logo').value.trim()||null,
+        username:document.getElementById('b2b-username').value,
+        password:document.getElementById('b2b-password').value,
+        schedule:'0 8 * * *', schedule_config:{...sc},
+        brands:document.getElementById('b2b-brands').value.split(',').map(s=>s.trim()).filter(Boolean),
+        enabled:document.getElementById('b2b-enabled').checked,
+        mail_enabled:true, mail_trigger:'auto', mail_recipients:[]};
+    const eid=document.getElementById('b2b-edit-id').value;
+    if(eid){const i=cfg.b2b_sites.findIndex(x=>x.id===eid);if(i>=0)cfg.b2b_sites[i]=site;}
+    else{if(cfg.b2b_sites.find(x=>x.id===id)){showToast(`"${id}" zaten var`,'error');return;}cfg.b2b_sites.push(site);}
+    closeModal('modal-b2b'); renderB2B();
+    showToast('Eklendi — "Kaydet" butonuna basın','info');
+}
+function deleteB2B(id){if(!confirm(`"${id}" silinecek?`))return;cfg.b2b_sites=cfg.b2b_sites.filter(x=>x.id!==id);renderB2B();}
+
+/* ── Fiyat Listesi ─────────────────────────────────────────────────────────── */
+function renderPrice() {
+    const el=document.getElementById('price-list');
+    if(!cfg.price_sites.length){el.innerHTML='<div class="empty-state"><div class="empty-icon">📊</div><p>Henüz fiyat sitesi eklenmemiş</p></div>';return;}
+    el.innerHTML=cfg.price_sites.map(s=>`
+        <div class="site-item">${logoHtml(s)}
+            <div class="site-info"><h4>${s.name} <code style="font-size:10px">${s.id}</code></h4><p>${s.url||'—'}</p></div>
+            <div class="site-actions">
+                <span class="badge ${s.enabled!==false?'badge-success':'badge-neutral'}">${s.enabled!==false?'Aktif':'Pasif'}</span>
+                <button class="btn btn-ghost btn-sm" onclick="editPrice('${s.id}')">Düzenle</button>
+                <button class="btn btn-danger btn-sm" onclick="deletePrice('${s.id}')">Sil</button>
+            </div>
+        </div>`).join('');
+}
+function openAddPrice(){
+    document.getElementById('price-modal-title').textContent='Fiyat Sitesi Ekle';
+    document.getElementById('price-edit-id').value='';
+    ['id','name','url','logo'].forEach(f=>document.getElementById('price-'+f).value='');
+    document.getElementById('price-id').disabled=false;
+    document.getElementById('price-enabled').checked=true;
+    document.getElementById('price-lp').innerHTML='<div class="logo-initial">?</div>';
+    openModal('modal-price');
+}
+function editPrice(id){
+    const s=cfg.price_sites.find(x=>x.id===id);if(!s)return;
+    document.getElementById('price-modal-title').textContent='Fiyat Sitesi Düzenle';
+    document.getElementById('price-edit-id').value=id;
+    document.getElementById('price-id').value=s.id;document.getElementById('price-id').disabled=true;
+    document.getElementById('price-name').value=s.name||'';
+    document.getElementById('price-url').value=s.url||'';
+    document.getElementById('price-logo').value=s.logo_url||'';
+    document.getElementById('price-enabled').checked=s.enabled!==false;
+    prevLogo('price-logo','price-lp');openModal('modal-price');
+}
+function savePrice(){
+    const id=document.getElementById('price-id').value.trim();
+    const name=document.getElementById('price-name').value.trim();
+    if(!id||!name){showToast('ID ve Ad zorunludur','error');return;}
+    const site={id,name,url:document.getElementById('price-url').value.trim(),
+        logo_url:document.getElementById('price-logo').value.trim()||null,
+        enabled:document.getElementById('price-enabled').checked};
+    const eid=document.getElementById('price-edit-id').value;
+    if(eid){const i=cfg.price_sites.findIndex(x=>x.id===eid);if(i>=0)cfg.price_sites[i]=site;}
+    else{if(cfg.price_sites.find(x=>x.id===id)){showToast(`"${id}" zaten var`,'error');return;}cfg.price_sites.push(site);}
+    closeModal('modal-price');renderPrice();
+    showToast('Eklendi — "Kaydet" butonuna basın','info');
+}
+function deletePrice(id){if(!confirm(`"${id}" silinecek?`))return;cfg.price_sites=cfg.price_sites.filter(x=>x.id!==id);renderPrice();}
+
+/* ── Kaydet ─────────────────────────────────────────────────────────────────── */
+async function saveAll() {
+    cfg.email.smtp_host       = document.getElementById('smtp_host').value;
+    cfg.email.smtp_port       = parseInt(document.getElementById('smtp_port').value);
+    cfg.email.sender_email    = document.getElementById('sender_email').value.trim();
+    cfg.email.sender_password = document.getElementById('sender_password').value;
+    cfg.claude_api_key        = document.getElementById('claude_api_key').value.trim();
+    cfg.claude_model          = document.getElementById('claude_model').value;
+    cfg.price_schedule        = document.getElementById('price_schedule').value.trim();
+    cfg.price_max_records     = parseInt(document.getElementById('price_max_records').value);
+
+    // Yeni B2B toplu zamanlama
+    cfg.b2b_schedule = getB2BSchedConfig();
+
+    try {
+        await api('POST','/settings/api',cfg);
+        await api('POST','/panel1/api/reload-scheduler');
+        await api('POST','/panel2/api/reload-scheduler');
+
+        // Badge'i güncelle
+        const times = cfg.b2b_schedule.times || [];
+        const specialCount = Object.keys(cfg.b2b_schedule.site_times || {}).length;
+        const badge = document.getElementById('sched-status-badge');
+        if (badge) {
+            badge.textContent = times.length
+                ? times.join(' ve ') + ' toplu' +
+                  (specialCount ? ` · ${specialCount} özel` : '')
+                : (specialCount ? `${specialCount} özel zamanlama` : 'Zamanlama yok');
+        }
+
+        showToast('Ayarlar kaydedildi ✓','success');
+    } catch(e){ showToast('Hata: '+e.message,'error'); }
+}
+
+/* ── Test maili modalı ──────────────────────────────────────────────────────── */
+function openTestMailModal() {
+    const allAddresses = [...new Set([
+        ...(cfg.email.recipients       || []),
+        ...(cfg.email.error_recipients || []),
+    ])];
+    const wrap = document.getElementById('s-test-options');
+    document.getElementById('s-custom-wrap').style.display = 'none';
+
+    if (!allAddresses.length) {
+        wrap.innerHTML = `<div class="text-muted" style="font-size:13px;padding:8px">
+            Kayıtlı adres yok. <a href="/settings/mail-lists" style="color:var(--accent)">
+            Mail Listeleri</a> sayfasından ekleyin.</div>`;
+    } else {
+        wrap.innerHTML = allAddresses.map((addr, i) => `
+            <label style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+                          border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;
+                          transition:background .12s"
+                   onmouseover="this.style.background='var(--surface-2)'"
+                   onmouseout="this.style.background=''">
+                <input type="radio" name="s_test_addr" value="${addr}"
+                       ${i===0?'checked':''} style="accent-color:var(--accent)"
+                       onchange="document.getElementById('s-custom-wrap').style.display='none'">
+                <span style="font-size:13px">${addr}</span>
+            </label>`).join('') + `
+            <label style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+                          border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;
+                          transition:background .12s"
+                   onmouseover="this.style.background='var(--surface-2)'"
+                   onmouseout="this.style.background=''">
+                <input type="radio" name="s_test_addr" value="__custom__"
+                       style="accent-color:var(--accent)"
+                       onchange="document.getElementById('s-custom-wrap').style.display='block'">
+                <span style="font-size:13px">Özel adres gir...</span>
+            </label>`;
+    }
+    openModal('modal-test-mail');
+}
+
+async function doTestMail() {
+    const sel = document.querySelector('input[name=s_test_addr]:checked');
+    if (!sel) { showToast('Bir adres seçin','error'); return; }
+    let to = sel.value;
+    if (to === '__custom__') {
+        to = document.getElementById('s-custom-inp').value.trim();
+        if (!to || !to.includes('@')) { showToast('Geçerli bir adres girin','error'); return; }
+    }
+    const btn = document.getElementById('s-test-send-btn');
+    btn.disabled = true; btn.textContent = '⏳';
+    try {
+        const saved = cfg.email.recipients;
+        cfg.email.recipients = [to];
+        await api('POST', '/settings/api', cfg);
+        await api('POST', '/settings/api/test-mail');
+        cfg.email.recipients = saved;
+        await api('POST', '/settings/api', cfg);
+        closeModal('modal-test-mail');
+        showToast(`Test maili gönderildi → ${to}`, 'success');
+    } catch(e) {
+        showToast('Hata: '+e.message, 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Gönder';
+    }
+}
+</script>
+
+<style>
+.sched-opt {
+    border: 2px solid var(--border); border-radius: var(--r);
+    padding: 16px; cursor: pointer; transition: all .15s; text-align: center;
+}
+.sched-opt:hover { border-color: #a5b4fc; background: var(--accent-dim); }
+.sched-opt.selected { border-color: var(--accent); background: var(--accent-dim); }
+.sched-opt-icon  { font-size: 28px; margin-bottom: 8px; }
+.sched-opt-title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+.sched-opt-desc  { font-size: 11px; color: var(--text-2); line-height: 1.4; }
+.sched-inputs    { margin-top: 20px; padding: 16px; background: var(--surface-2);
+                   border-radius: var(--r); border: 1px solid var(--border); }
+</style>
+{% endblock %}

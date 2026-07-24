@@ -1,0 +1,460 @@
+{% extends "base.html" %}
+{% set active = "panel2" %}
+{% block title %}Fiyat &amp; Analiz{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <div>
+        <h1>Fiyat &amp; Analiz</h1>
+        <p class="text-muted">Piyasa fiyat takibi ve AI destekli analiz raporu</p>
+    </div>
+    <div class="flex gap-8">
+        <button class="btn btn-primary btn-sm" onclick="runAll(this)">▶ Tümünü Tara</button>
+        <a href="/settings" class="btn btn-ghost btn-sm">⚙ Ayarlar</a>
+    </div>
+</div>
+
+<div data-tabs>
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="tab-sites">Site Durumu</button>
+        <button class="tab-btn" data-tab="tab-comparison">⚖️ Karşılaştırma</button>
+        <button class="tab-btn" data-tab="tab-advantage">📈 Avantaj Raporu</button>
+        <button class="tab-btn" data-tab="tab-bestsellers">En Çok Satanlar</button>
+        <button class="tab-btn" data-tab="tab-discounts">En İskontolu</button>
+        <button class="tab-btn" data-tab="tab-cheapest">En Ucuz</button>
+        <button class="tab-btn" data-tab="tab-search">🔍 Ürün Ara</button>
+        <button class="tab-btn" data-tab="tab-ai">🤖 AI Analiz</button>
+    </div>
+
+    <!-- ── Site Durumu ─────────────────────────────────────────────────────── -->
+    <div id="tab-sites" class="tab-panel active">
+        {% if sites or b2b_sites %}
+        <div class="card">
+            <div class="table-container">
+                <table>
+                    <thead><tr><th style="width:36px"></th><th>Site Adı</th><th>Kaynak</th><th>Durum</th><th>İşlem</th></tr></thead>
+                    <tbody>
+                        {% for s in sites %}
+                        <tr>
+                            <td>
+                                <div class="logo-wrap logo-clickable"
+                                     onclick="document.getElementById('logo-file-{{ s.id }}').click()"
+                                     title="Logo değiştir">
+                                    {% if s.get('logo_url') %}<img src="{{ s.logo_url }}" onerror="this.style.display='none';this.nextSibling.style.display='flex'">{% endif %}
+                                    <div class="logo-initial" {% if s.get('logo_url') %}style="display:none"{% endif %}>{{ s.name[0]|upper }}</div>
+                                </div>
+                                <input type="file" id="logo-file-{{ s.id }}" accept="image/*"
+                                       style="display:none"
+                                       onchange="uploadPriceSiteLogo('{{ s.id }}', this)">
+                            </td>
+                            <td style="font-weight:600">
+                                {{ s.name }}
+                                {% if s.get('is_our_catalog') %}<span class="badge badge-success" style="margin-left:6px">★ Bizim Katalog</span>{% endif %}
+                                <br><span style="font-size:11px;color:var(--text-3)">{{ s.url }}</span>
+                            </td>
+                            <td><span class="badge badge-market">Piyasa</span></td>
+                            <td>{% if s.get('enabled',True) %}<span class="badge badge-success">Aktif</span>{% else %}<span class="badge badge-neutral">Pasif</span>{% endif %}</td>
+                            <td>
+                                <div class="flex gap-8">
+                                    <button class="btn btn-primary btn-sm" onclick="runSite('{{ s.id }}',this)">▶ Tara</button>
+                                    <button class="btn btn-ghost btn-sm"
+                                            onclick="document.getElementById('logo-file-{{ s.id }}').click()"
+                                            title="Logo yükle">🖼 Logo</button>
+                                    <button class="btn btn-ghost btn-sm"
+                                            onclick="toggleOurCatalog('{{ s.id }}', {{ 'false' if s.get('is_our_catalog') else 'true' }})"
+                                            title="Kendi sitemiz mi?">{{ '★ Katalogtan Çıkar' if s.get('is_our_catalog') else '☆ Bizim Katalog' }}</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% for s in b2b_sites %}
+                        <tr>
+                            <td>
+                                <div class="logo-wrap">
+                                    {% if s.get('logo_url') %}<img src="{{ s.logo_url }}" onerror="this.style.display='none';this.nextSibling.style.display='flex'">{% endif %}
+                                    <div class="logo-initial" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);{% if s.get('logo_url') %}display:none{% endif %}">{{ s.name[0]|upper }}</div>
+                                </div>
+                            </td>
+                            <td style="font-weight:600">{{ s.name }}<br><span style="font-size:11px;color:var(--text-3)">{{ s.url }}</span></td>
+                            <td><span class="badge badge-b2b">B2B Stok</span></td>
+                            <td>{% if s.get('enabled',True) %}<span class="badge badge-success">Aktif</span>{% else %}<span class="badge badge-neutral">Pasif</span>{% endif %}</td>
+                            <td><span class="text-muted" style="font-size:12px">Panel 1'den</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <div class="card"><div class="empty-state"><div class="empty-icon">📊</div><p>Henüz site eklenmemiş.</p><a href="/settings" class="btn btn-primary" style="margin-top:14px">⚙ Ayarlara Git</a></div></div>
+        {% endif %}
+    </div>
+
+    <!-- ── Karşılaştırma ──────────────────────────────────────────────────── -->
+    <div id="tab-comparison" class="tab-panel">
+        <div class="card mb-20">
+            <div class="flex-between">
+                <div>
+                    <div class="card-title">⚖️ Ürün Karşılaştırması</div>
+                    <p class="text-muted" style="font-size:13px;margin-top:4px">
+                        Kendi katalogumuzdaki ürünlerin rakip sitelerle fiyat/iskonto karşılaştırması.
+                        Önce <b>Ayarlar → Fiyat Siteleri</b>'nde kendi sitenizi "Bizim Katalog" olarak
+                        işaretleyin ve ürün eşleştirmesi yükleyin.
+                    </p>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="loadComparison()">Getir</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="table-container">
+                <table id="cmp-table">
+                    <thead><tr>
+                        <th>EM Kodu</th><th>Bizim Fiyat</th><th>Rakip Ort.</th>
+                        <th>Min Rakip</th><th>Fark</th><th>Sıra</th><th>Durum</th>
+                    </tr></thead>
+                    <tbody><tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px">"Getir" butonuna basın</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Avantaj Raporu ─────────────────────────────────────────────────── -->
+    <div id="tab-advantage" class="tab-panel">
+        <div class="card mb-20">
+            <div class="flex-between">
+                <div class="card-title">📈 Avantaj / Dezavantaj Raporu</div>
+                <button class="btn btn-primary btn-sm" onclick="loadAdvantage()">Getir</button>
+            </div>
+        </div>
+        <div id="adv-summary" class="grid-4 mb-20"></div>
+        <div class="card mb-20">
+            <div class="card-title" style="padding:8px 0">🟢 En Avantajlı Olduğumuz Ürünler</div>
+            <div class="table-container">
+                <table id="adv-top-table">
+                    <thead><tr><th>EM Kodu</th><th>Bizim Fiyat</th><th>Rakip Ort.</th><th>Fark %</th></tr></thead>
+                    <tbody><tr><td colspan="4" class="text-muted" style="text-align:center;padding:24px">—</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title" style="padding:8px 0">🔴 En Geride Olduğumuz Ürünler</div>
+            <div class="table-container">
+                <table id="adv-bottom-table">
+                    <thead><tr><th>EM Kodu</th><th>Bizim Fiyat</th><th>Rakip Ort.</th><th>Fark %</th></tr></thead>
+                    <tbody><tr><td colspan="4" class="text-muted" style="text-align:center;padding:24px">—</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── En Çok Satanlar ────────────────────────────────────────────────── -->
+    <div id="tab-bestsellers" class="tab-panel">
+        <div class="card mb-20">
+            <div class="flex gap-8">
+                <select class="form-select" id="bs-site" style="max-width:200px">
+                    <option value="">Tüm Siteler</option>
+                    {% for s in sites %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="loadBestsellers()">Getir</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="table-container">
+                <table id="bs-table">
+                    <thead><tr><th>Ürün</th><th>Marka</th><th>Site</th><th>Görülme</th><th>Ort. Fiyat</th><th>Min Fiyat</th></tr></thead>
+                    <tbody><tr><td colspan="6" class="text-muted" style="text-align:center;padding:32px">"Getir" butonuna basın</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── En İskontolu ───────────────────────────────────────────────────── -->
+    <div id="tab-discounts" class="tab-panel">
+        <div class="card mb-20">
+            <div class="flex gap-8">
+                <select class="form-select" id="disc-site" style="max-width:200px">
+                    <option value="">Tüm Siteler</option>
+                    {% for s in sites %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="loadDiscounts()">Getir</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="table-container">
+                <table id="disc-table">
+                    <thead><tr><th>Ürün</th><th>Marka</th><th>Site</th><th>Fiyat</th><th>Eski Fiyat</th><th>İskonto</th><th>Link</th></tr></thead>
+                    <tbody><tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px">"Getir" butonuna basın</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── En Ucuz ────────────────────────────────────────────────────────── -->
+    <div id="tab-cheapest" class="tab-panel">
+        <div class="card mb-20">
+            <div class="flex gap-8">
+                <input type="text" class="form-input" id="cp-brand" placeholder="Marka (boş = tümü)" style="max-width:240px">
+                <button class="btn btn-primary btn-sm" onclick="loadCheapest()">Getir</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="table-container">
+                <table id="cp-table">
+                    <thead><tr><th>Ürün</th><th>Marka</th><th>Site</th><th>En Ucuz</th><th>Link</th></tr></thead>
+                    <tbody><tr><td colspan="5" class="text-muted" style="text-align:center;padding:32px">"Getir" butonuna basın</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Ürün Ara ───────────────────────────────────────────────────────── -->
+    <div id="tab-search" class="tab-panel">
+        <div class="card mb-20">
+            <div class="search-bar">
+                <input type="text" class="search-input" id="srch-q"
+                       placeholder="Ürün kodu veya adı ile ara — piyasa + B2B stokları..."
+                       onkeydown="if(event.key==='Enter') doSearch()">
+                <button class="btn btn-primary" onclick="doSearch()">Ara</button>
+            </div>
+            <div class="form-hint" style="margin-top:6px">Hem piyasa hem B2B stok verilerinde aynı anda arama yapılır.</div>
+        </div>
+        <div class="card">
+            <div class="table-container">
+                <table id="srch-table">
+                    <thead><tr><th>Kaynak</th><th>Ürün Kodu</th><th>Ürün Adı</th><th>Site</th><th>Stok</th><th>Koli</th><th>Fiyat</th><th>İskonto</th><th>Tarih</th><th></th></tr></thead>
+                    <tbody><tr><td colspan="10" class="text-muted" style="text-align:center;padding:32px">Arama yapın</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── AI Analiz ──────────────────────────────────────────────────────── -->
+    <div id="tab-ai" class="tab-panel">
+        <div class="card mb-20">
+            <div class="flex-between">
+                <div>
+                    <div class="card-title">🤖 AI Destekli Analiz Raporu</div>
+                    <div class="form-hint" style="margin-top:4px">
+                        28 kaynaktan toplanan veriler Claude AI'ya gönderilir. Analiz 30-90 saniye sürebilir.
+                    </div>
+                </div>
+                <div class="flex gap-8">
+                    <select class="form-select" id="ai-report-list" style="max-width:240px" onchange="loadReport(this.value)">
+                        <option value="">— Geçmiş Raporlar —</option>
+                    </select>
+                    <button class="btn btn-primary" id="ai-start-btn" onclick="startAnalysis()">🤖 Analiz Başlat</button>
+                </div>
+            </div>
+        </div>
+        <div class="card">
+            <div id="ai-content">
+                <div class="ai-placeholder">
+                    <div class="ai-placeholder-icon">🤖</div>
+                    <p>"Analiz Başlat" butonuna basın.</p>
+                    <p style="font-size:12px;margin-top:6px">Önce Ayarlar → AI Ayarları bölümünden Claude API anahtarınızı ekleyin.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const f2 = v => v != null ? Number(v).toFixed(2) : '—';
+const lnk = url => url ? `<a href="${url}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">↗</a>` : '—';
+const emp = (c,m) => `<tr><td colspan="${c}" class="text-muted" style="text-align:center;padding:32px">${m}</td></tr>`;
+
+const VERDICT_LABELS = {
+    en_ucuz: '🟢 En Ucuz', ortalama_alti: '🟢 Ort. Altı', ortalama: '🟡 Ortalama',
+    ortalama_ustu: '🔴 Ort. Üstü', en_pahali: '🔴 En Pahalı', tek_basina: '⚪ Tek',
+};
+
+async function loadComparison() {
+    const tb = document.querySelector('#cmp-table tbody');
+    tb.innerHTML = emp(7, '⏳ Yükleniyor...');
+    try {
+        const d = await api('GET', '/panel2/api/comparison/all');
+        if (!d.length) {
+            tb.innerHTML = emp(7, 'Karşılaştırılacak veri yok. Önce "Bizim Katalog" sitesi işaretleyip ürün eşleştirmesi yükleyin.');
+            return;
+        }
+        tb.innerHTML = d.map(c => {
+            const pos = c.position;
+            if (!pos) return `<tr><td>${c.em_code}</td><td colspan="6" class="text-muted">Rakip verisi yok</td></tr>`;
+            const diffColor = pos.diff_vs_avg < 0 ? '#16a34a' : pos.diff_vs_avg > 0 ? '#dc2626' : '#64748b';
+            return `<tr>
+                <td><b>${c.em_code}</b></td>
+                <td>${f2(pos.our_price)} ₺</td>
+                <td>${f2(c.stats.avg_price)} ₺</td>
+                <td>${f2(c.stats.min_price)} ₺</td>
+                <td style="color:${diffColor};font-weight:600">${pos.diff_vs_avg>0?'+':''}${f2(pos.diff_vs_avg)} ₺</td>
+                <td>${pos.rank||'—'}/${pos.total||'—'}</td>
+                <td>${VERDICT_LABELS[pos.verdict]||pos.verdict}</td>
+            </tr>`;
+        }).join('');
+    } catch(e) { tb.innerHTML = emp(7, 'Hata: '+e.message); }
+}
+
+async function loadAdvantage() {
+    const sumEl = document.getElementById('adv-summary');
+    sumEl.innerHTML = '<div class="text-muted">⏳ Yükleniyor...</div>';
+    try {
+        const r = await api('GET', '/panel2/api/advantage/report');
+        const s = r.summary;
+        sumEl.innerHTML = `
+            <div class="stat-card"><div class="stat-label">Toplam</div><div class="stat-value">${s.total}</div></div>
+            <div class="stat-card"><div class="stat-label">🟢 Avantajlı</div><div class="stat-value" style="color:#16a34a">${s.avantajli}</div></div>
+            <div class="stat-card"><div class="stat-label">🟡 Rekabetçi</div><div class="stat-value" style="color:#d97706">${s.rekabetci}</div></div>
+            <div class="stat-card"><div class="stat-label">🔴 Geride</div><div class="stat-value" style="color:#dc2626">${s.geride}</div></div>`;
+
+        const top = await api('GET', '/panel2/api/advantage/top?limit=15');
+        const tb1 = document.querySelector('#adv-top-table tbody');
+        tb1.innerHTML = top.length ? top.map(x=>`<tr><td><b>${x.em_code}</b></td><td>${f2(x.our_price)} ₺</td><td>${f2(x.avg_competitor)} ₺</td><td style="color:#16a34a;font-weight:600">${f2(x.diff_pct)}%</td></tr>`).join('') : emp(4,'Veri yok');
+
+        const bottom = await api('GET', '/panel2/api/advantage/bottom?limit=15');
+        const tb2 = document.querySelector('#adv-bottom-table tbody');
+        tb2.innerHTML = bottom.length ? bottom.map(x=>`<tr><td><b>${x.em_code}</b></td><td>${f2(x.our_price)} ₺</td><td>${f2(x.avg_competitor)} ₺</td><td style="color:#dc2626;font-weight:600">+${f2(x.diff_pct)}%</td></tr>`).join('') : emp(4,'Veri yok');
+    } catch(e) { sumEl.innerHTML = '<div class="text-muted">Hata: '+e.message+'</div>'; }
+}
+
+async function toggleOurCatalog(siteId, flag) {
+    try {
+        await api('POST', `/panel2/api/site/${siteId}/our-catalog`, { is_our_catalog: flag });
+        showToast(flag ? 'Bizim Katalog olarak işaretlendi' : 'Katalogtan çıkarıldı', 'success');
+        setTimeout(() => location.reload(), 500);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function uploadPriceSiteLogo(siteId, inp) {
+    const file = inp.files[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('logo', file);
+    try {
+        const r = await fetch(`/panel2/api/site/${siteId}/logo`, { method: 'POST', body: fd });
+        const d = await r.json();
+        if (!r.ok) {
+            showToast(d.error || 'Logo yüklenemedi', 'error');
+            return;
+        }
+        showToast('Logo güncellendi', 'success');
+        setTimeout(() => location.reload(), 500);
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        inp.value = '';
+    }
+}
+
+async function runAll(btn) {
+    btn.disabled=true; btn.textContent='⏳';
+    try { await api('POST','/panel2/api/run/all'); showToast('Tarama başlatıldı','info'); }
+    catch(e) { showToast(e.message,'error'); }
+    setTimeout(()=>{btn.disabled=false;btn.textContent='▶ Tümünü Tara';},5000);
+}
+async function runSite(id,btn) {
+    btn.disabled=true; btn.textContent='⏳';
+    try { await api('POST',`/panel2/api/run/${id}`); showToast('Tarama başlatıldı','info'); }
+    catch(e) { showToast(e.message,'error'); }
+    setTimeout(()=>{btn.disabled=false;btn.textContent='▶ Tara';},5000);
+}
+
+async function loadBestsellers() {
+    const sid=document.getElementById('bs-site').value;
+    const d=await api('GET','/panel2/api/analyze/bestsellers'+(sid?`?site_id=${sid}`:''));
+    const tb=document.querySelector('#bs-table tbody');
+    if(!d.length){tb.innerHTML=emp(6,'Veri bulunamadı');return;}
+    tb.innerHTML=d.map(r=>`<tr><td>${r.product_name}</td><td>${r.brand||'—'}</td><td>${r.site_name}</td><td><span class="badge badge-info">${r.gorulme}</span></td><td>${f2(r.ort_fiyat)} ₺</td><td><b>${f2(r.min_fiyat)} ₺</b></td></tr>`).join('');
+}
+
+async function loadDiscounts() {
+    const sid=document.getElementById('disc-site').value;
+    const d=await api('GET','/panel2/api/analyze/discounts'+(sid?`?site_id=${sid}`:''));
+    const tb=document.querySelector('#disc-table tbody');
+    if(!d.length){tb.innerHTML=emp(7,'Veri bulunamadı');return;}
+    tb.innerHTML=d.map(r=>`<tr><td>${r.product_name}</td><td>${r.brand||'—'}</td><td>${r.site_name}</td><td><b>${f2(r.price)} ₺</b></td><td><s>${f2(r.old_price)} ₺</s></td><td><span class="badge badge-error">%${r.discount_percent||0}</span></td><td>${lnk(r.url)}</td></tr>`).join('');
+}
+
+async function loadCheapest() {
+    const b=document.getElementById('cp-brand').value;
+    const d=await api('GET','/panel2/api/analyze/cheapest'+(b?`?brand=${encodeURIComponent(b)}`:''));
+    const tb=document.querySelector('#cp-table tbody');
+    if(!d.length){tb.innerHTML=emp(5,'Veri bulunamadı');return;}
+    tb.innerHTML=d.map(r=>`<tr><td>${r.product_name}</td><td>${r.brand||'—'}</td><td>${r.site_name}</td><td><b>${f2(r.min_fiyat)} ₺</b></td><td>${lnk(r.url)}</td></tr>`).join('');
+}
+
+async function doSearch() {
+    const q=document.getElementById('srch-q').value.trim();
+    if(!q)return;
+    const d=await api('GET',`/panel2/api/search?q=${encodeURIComponent(q)}`);
+    const tb=document.querySelector('#srch-table tbody');
+    if(!d.length){tb.innerHTML=emp(10,'Sonuç bulunamadı');return;}
+    tb.innerHTML=d.map(r=>{
+        const src=r.source_type==='b2b'?'<span class="badge badge-b2b">B2B</span>':'<span class="badge badge-market">Piyasa</span>';
+        const pr=r.price_text||(r.price!=null?f2(r.price)+' ₺':'—');
+        const dk=r.discount_percent!=null?`<span class="badge badge-error">%${r.discount_percent}</span>`:'—';
+        return `<tr>${[src,`<code style="font-size:11px">${r.product_code||'—'}</code>`,r.product_name||'—',r.site_name,r.stock||'—',r.adet||'—',`<b>${pr}</b>`,dk,`<span style="font-size:11px">${(r.scraped_at||'').substring(0,16)}</span>`,lnk(r.url)].map(c=>`<td>${c}</td>`).join('')}</tr>`;
+    }).join('');
+}
+
+// ── AI Analiz ─────────────────────────────────────────────────────────────────
+let _aiPolling = null;
+
+async function startAnalysis() {
+    const btn = document.getElementById('ai-start-btn');
+    try {
+        await api('POST', '/panel2/api/ai/analyze');
+        btn.disabled = true;
+        document.getElementById('ai-content').innerHTML =
+            '<div class="progress-row"><span class="spinner"></span> Analiz çalışıyor... (30-90 saniye)</div>';
+        _aiPolling = setInterval(pollAI, 3000);
+    } catch(e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function pollAI() {
+    const state = await api('GET', '/panel2/api/ai/status');
+    if (!state.running) {
+        clearInterval(_aiPolling);
+        document.getElementById('ai-start-btn').disabled = false;
+        if (state.error) {
+            document.getElementById('ai-content').innerHTML =
+                `<div class="empty-state"><p class="text-error">Hata: ${state.error}</p></div>`;
+            showToast('AI analiz hatası', 'error');
+        } else if (state.last_id) {
+            await loadReport(state.last_id);
+            await loadReportList();
+            showToast('AI raporu hazır ✓', 'success');
+        }
+    }
+}
+
+async function loadReport(id) {
+    if (!id) return;
+    document.getElementById('ai-content').innerHTML =
+        '<div class="progress-row"><span class="spinner"></span> Rapor yükleniyor...</div>';
+    try {
+        const r = await api('GET', `/panel2/api/ai/reports/${id}`);
+        document.getElementById('ai-content').innerHTML =
+            `<div style="padding:4px 0;margin-bottom:12px;font-size:12px;color:var(--text-3)">
+                📅 ${r.created_at} &nbsp;·&nbsp; ${r.input_summary || ''} &nbsp;·&nbsp; ${r.token_count||0} token
+             </div>
+             <div class="ai-report">${r.report_html}</div>`;
+        document.getElementById('ai-report-list').value = id;
+    } catch(e) {
+        showToast('Rapor yüklenemedi: ' + e.message, 'error');
+    }
+}
+
+async function loadReportList() {
+    const reports = await api('GET', '/panel2/api/ai/reports');
+    const sel = document.getElementById('ai-report-list');
+    sel.innerHTML = '<option value="">— Geçmiş Raporlar —</option>' +
+        reports.map(r => `<option value="${r.id}">${r.created_at.substring(0,16)} (${r.token_count||0} token)</option>`).join('');
+}
+
+document.addEventListener('DOMContentLoaded', loadReportList);
+</script>
+{% endblock %}

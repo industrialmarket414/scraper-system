@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ScrapeNet{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- Hamburger (sadece mobilde görünür) -->
+<button id="menu-toggle" onclick="toggleMenu()" title="Menü">☰</button>
+<div id="sidebar-overlay" onclick="toggleMenu()"></div>
+
+<nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+        <span class="brand-icon">⬡</span>
+        <span class="brand-name">ScrapeNet</span>
+    </div>
+    <ul class="nav-links">
+        <li><a href="/"                    class="nav-link {% if active=='home'     %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">⌂</span> Ana Sayfa</a></li>
+        <li><a href="/panel1"              class="nav-link {% if active=='panel1'   %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">📦</span> B2B Stok</a></li>
+        <li><a href="/panel2"              class="nav-link {% if active=='panel2'   %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">📊</span> Fiyat Analiz</a></li>
+        <li><a href="/logs"                class="nav-link {% if active=='logs'     %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">📋</span> Loglar</a></li>
+        <li><a href="/settings/mail-lists" class="nav-link {% if active=='mail'     %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">✉</span> Mail Listeleri</a></li>
+        <li><a href="/settings/product-mapping" class="nav-link {% if active=='mapping' %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">🔗</span> Ürün Eşleştirme</a></li>
+        <li><a href="/settings/fixed-stock" class="nav-link {% if active=='fixed_stock' %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">📦</span> Sabit Stok</a></li>
+        <li><a href="/settings"            class="nav-link {% if active=='settings' %}active{% endif %}" onclick="closeMenu()"><span class="nav-icon">⚙</span> Ayarlar</a></li>
+    </ul>
+    <div class="sidebar-footer">ScrapeNet v1.0</div>
+</nav>
+
+<main class="main-content">
+    <div class="content-wrapper">
+        {% block content %}{% endblock %}
+    </div>
+</main>
+
+<div id="toast-container"></div>
+
+<!-- Global aktif çekim durumu — her sayfada altta görünür -->
+<a id="global-running-bar" href="/panel1" title="Panel 1'e git">
+    <span class="grb-spinner"></span>
+    <span class="grb-text">Aktif çekim yok</span>
+</a>
+
+<style>
+#global-running-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    display: none;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(245,158,11,.35), 0 2px 6px rgba(0,0,0,.1);
+    text-decoration: none;
+    z-index: 9999;
+    max-width: calc(100vw - 32px);
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+#global-running-bar:hover {
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 12px 32px rgba(245,158,11,.45), 0 4px 8px rgba(0,0,0,.12);
+}
+#global-running-bar.visible { display: inline-flex; }
+#global-running-bar .grb-spinner {
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: grb-spin .8s linear infinite;
+    flex-shrink: 0;
+}
+#global-running-bar .grb-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+@keyframes grb-spin { to { transform: rotate(360deg); } }
+@media (max-width: 600px) {
+    #global-running-bar { bottom: 12px; font-size: 12px; padding: 8px 14px; }
+}
+</style>
+
+<script src="/static/js/main.js"></script>
+<script>
+function toggleMenu() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('open');
+}
+function closeMenu() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('open');
+}
+
+// ── Global aktif çekim durumu ─────────────────────────────────────────────
+(function() {
+    const bar  = document.getElementById('global-running-bar');
+    const text = bar.querySelector('.grb-text');
+
+    async function refresh() {
+        try {
+            const r = await fetch('/panel1/api/status', { cache: 'no-store' });
+            if (!r.ok) return;
+            const list = await r.json();
+            const running = list.filter(s => s.running);
+
+            if (running.length === 0) {
+                bar.classList.remove('visible');
+                return;
+            }
+
+            const names = running.map(s => s.name).join(', ');
+            const label = running.length === 1
+                ? `${names} çekiliyor…`
+                : `${running.length} site çekiliyor: ${names}`;
+            text.textContent = label;
+            bar.classList.add('visible');
+        } catch (_) { /* sessizce yut */ }
+    }
+
+    refresh();
+    setInterval(refresh, 3000);
+})();
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

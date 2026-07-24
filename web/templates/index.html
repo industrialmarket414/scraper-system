@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% set active = "home" %}
+{% block title %}ScrapeNet{% endblock %}
+
+{% block content %}
+<div class="home-center">
+    <div>
+        <div style="text-align:center;margin-bottom:40px">
+            <h1 style="font-size:28px;font-weight:800;color:var(--text);margin-bottom:6px">ScrapeNet</h1>
+            <p style="color:var(--text-2);font-size:15px">Otomatik scraping ve analiz platformu</p>
+        </div>
+        <div class="home-grid">
+            <a href="/panel1" class="home-card">
+                <div class="home-card-icon">📦</div>
+                <h2>B2B Stok</h2>
+                <p>B2B sitelerinden stok çekimi, Excel raporu ve otomatik mail</p>
+            </a>
+            <a href="/panel2" class="home-card">
+                <div class="home-card-icon">📊</div>
+                <h2>Fiyat &amp; Analiz</h2>
+                <p>Fiyat takibi, iskonto analizi ve AI destekli öneri raporu</p>
+            </a>
+        </div>
+        {% if stats %}
+        <div style="display:flex;gap:24px;justify-content:center;margin-top:32px;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--text-3)">
+                📦 {{ stats.b2b_count }} B2B site
+            </span>
+            <span style="font-size:12px;color:var(--text-3)">
+                📊 {{ stats.price_count }} fiyat sitesi
+            </span>
+            {% if stats.b2b_last_run %}
+            <span style="font-size:12px;color:var(--text-3)">
+                Son çalışma: {{ stats.b2b_last_run }}
+                {% if stats.b2b_last_ok %}<span style="color:var(--success)">●</span>{% else %}<span style="color:var(--error)">●</span>{% endif %}
+            </span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

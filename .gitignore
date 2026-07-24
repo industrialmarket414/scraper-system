@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local runtime data and secrets
+config/settings.json
+config/*.db
+config/*.sqlite*
+config/cookies_*.json
+config/.sessions/
+.env
+.env.*
+!.env.example
+
+# Logs and temporary files
+logs/
+*.log
+.codex-tmp/
+panel1_b2b/outputs/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

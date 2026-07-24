@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% set active = "mapping" %}
+{% block title %}Ürün Eşleştirme{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Ürün Eşleştirme</h1>
+        <p class="text-muted">
+            Endüstriyel Market ürün kodlarını her B2B sitesindeki karşılık kodla eşleştir.
+            Her çekim sonrası Excel'in ilk sütununda "EM Kodu" görünecek.
+        </p>
+    </div>
+</div>
+
+<!-- ── Yükleme ───────────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">📤 Excel Yükle</span>
+    </div>
+    <div style="padding:8px 4px">
+        <p style="margin:0 0 12px 0;color:#475569;font-size:14px">
+            <b>Format:</b> 1. sütun <code>EM Kodu</code>, sonraki sütunlar her B2B sitesinin adı veya ID'si
+            (header satırı). Boş hücreler atlanır. <b>Yeni yükleme eskisini tamamen siler.</b>
+        </p>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <a class="btn btn-secondary" href="/settings/api/product-mapping/template" download>
+                📥 Boş Şablon İndir
+            </a>
+
+            <a class="btn btn-secondary" href="/settings/api/product-mapping/download" download>
+                📊 Dolu Excel İndir
+            </a>
+
+            <input type="file" id="mapping-file" accept=".xlsx,.xlsm"
+                   style="display:none" onchange="uploadMapping(this)">
+            <button class="btn btn-primary" onclick="document.getElementById('mapping-file').click()">
+                📤 Excel Yükle
+            </button>
+
+            <button class="btn btn-danger" onclick="clearMapping()">
+                🗑 Tümünü Sil
+            </button>
+
+            <span id="upload-status" style="color:#64748b;font-size:13px"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Özet ──────────────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">📊 Mevcut Eşleştirmeler</span>
+    </div>
+    <div style="padding:8px 4px">
+        <div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:14px">
+            <div>
+                <div style="color:#64748b;font-size:12px">Toplam Eşleştirme</div>
+                <div style="font-size:28px;font-weight:700;color:#0f172a" id="stat-total">{{ summary.total }}</div>
+            </div>
+            <div>
+                <div style="color:#64748b;font-size:12px">Tekil EM Kodu</div>
+                <div style="font-size:28px;font-weight:700;color:#0f172a" id="stat-em">{{ summary.unique_em }}</div>
+            </div>
+        </div>
+
+        <table class="table" id="site-counts">
+            <thead>
+                <tr><th>Site</th><th style="text-align:right">Eşleştirme Sayısı</th></tr>
+            </thead>
+            <tbody>
+                {% for site in sites %}
+                <tr>
+                    <td>{{ site.name }}</td>
+                    <td style="text-align:right">
+                        {{ summary.by_site.get(site.id, 0) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ── Önizleme ──────────────────────────────────────────────────────── -->
+{% if sample %}
+<div class="card">
+    <div class="card-header">
+        <span class="card-title">👁 Önizleme (ilk 50 satır)</span>
+    </div>
+    <div style="padding:8px 4px;overflow-x:auto">
+        <table class="table">
+            <thead>
+                <tr><th>EM Kodu</th><th>Site</th><th>Site Kodu</th></tr>
+            </thead>
+            <tbody>
+                {% for r in sample %}
+                <tr>
+                    <td><code>{{ r.em_code }}</code></td>
+                    <td>{{ r.site_id }}</td>
+                    <td><code>{{ r.site_code }}</code></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function uploadMapping(inp) {
+    const file = inp.files[0];
+    if (!file) return;
+    const status = document.getElementById('upload-status');
+    status.textContent = '⏳ Yükleniyor...';
+    status.style.color = '#64748b';
+
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const r = await fetch('/settings/api/product-mapping/upload', {
+            method: 'POST', body: fd
+        });
+        const d = await r.json();
+        if (!r.ok) {
+            status.textContent = '❌ ' + (d.error || 'Yükleme başarısız');
+            status.style.color = '#dc2626';
+            return;
+        }
+        status.textContent = `✓ ${d.saved} eşleştirme kaydedildi`;
+        status.style.color = '#16a34a';
+        if (d.skipped_headers && d.skipped_headers.length) {
+            status.textContent += ` (atlanan başlık: ${d.skipped_headers.join(', ')})`;
+        }
+        setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+        status.textContent = '❌ ' + e.message;
+        status.style.color = '#dc2626';
+    } finally {
+        inp.value = '';
+    }
+}
+
+async function clearMapping() {
+    if (!confirm('Tüm ürün eşleştirme kayıtları silinecek. Emin misin?')) return;
+    const status = document.getElementById('upload-status');
+    status.textContent = '⏳ Siliniyor...';
+    try {
+        const r = await fetch('/settings/api/product-mapping', { method: 'DELETE' });
+        if (r.ok) {
+            status.textContent = '✓ Tüm kayıtlar silindi';
+            status.style.color = '#16a34a';
+            setTimeout(() => location.reload(), 800);
+        }
+    } catch (e) {
+        status.textContent = '❌ ' + e.message;
+        status.style.color = '#dc2626';
+    }
+}
+</script>
+{% endblock %}

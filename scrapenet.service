@@ -1,0 +1,18 @@
+[Unit]
+Description=ScrapeNet Web Scraping Platform
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=em-ofis
+WorkingDirectory=/home/em-ofis/scraper-system
+ExecStart=/home/em-ofis/scraper-system/venv/bin/python /home/em-ofis/scraper-system/main.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/home/em-ofis/scraper-system/logs/service.log
+StandardError=append:/home/em-ofis/scraper-system/logs/service_error.log
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% set active = "mail" %}
+{% block title %}Mail Listeleri{% endblock %}
+
+{% block content %}
+<div class="page-header flex-between">
+    <div>
+        <h1>Mail Listeleri</h1>
+        <p class="text-muted">Rapor ve hata bildirim e-posta adresleri</p>
+    </div>
+    <div class="flex gap-8">
+        <button class="btn btn-ghost btn-sm" onclick="openTestMailModal()">✉ Test Maili</button>
+        <button class="btn btn-primary" onclick="saveAll()">💾 Kaydet</button>
+    </div>
+</div>
+
+<!-- Rapor Alıcıları -->
+<div class="card mb-20">
+    <div class="card-header">
+        <div>
+            <div class="card-title">📬 Rapor Alıcıları</div>
+            <div class="form-hint" style="margin-top:2px">
+                Excel raporları ve otomatik çekim bildirimleri bu adreslere gönderilir
+            </div>
+        </div>
+        <span id="cnt-r" class="badge badge-info">0</span>
+    </div>
+    <div class="chips-wrap" id="rcp-wrap"></div>
+    <div class="chip-add-row">
+        <input type="email" class="form-input" id="inp-rcp"
+               placeholder="rapor@sirket.com"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();addEmail('rcp')}">
+        <button class="btn btn-primary btn-sm" onclick="addEmail('rcp')">+ Ekle</button>
+    </div>
+</div>
+
+<!-- Hata Bildirimi -->
+<div class="card">
+    <div class="card-header">
+        <div>
+            <div class="card-title">⚠️ Hata Bildirimi Alıcıları</div>
+            <div class="form-hint" style="margin-top:2px">
+                Scraper hataları ve sistem hataları bu adreslere gönderilir
+            </div>
+        </div>
+        <span id="cnt-e" class="badge badge-error">0</span>
+    </div>
+    <div class="chips-wrap" id="err-wrap"></div>
+    <div class="chip-add-row">
+        <input type="email" class="form-input" id="inp-err"
+               placeholder="hata@sirket.com"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();addEmail('err')}">
+        <button class="btn btn-primary btn-sm" onclick="addEmail('err')">+ Ekle</button>
+    </div>
+</div>
+
+<!-- ── Modal: Test Maili ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-test-mail">
+    <div class="modal" style="max-width:420px">
+        <div class="modal-header">
+            <span class="modal-title">Test Maili Gönder</span>
+            <button class="modal-close" onclick="closeModal('modal-test-mail')">✕</button>
+        </div>
+
+        <p class="text-muted" style="font-size:13px;margin-bottom:14px">
+            Hangi adrese test maili göndermek istiyorsunuz?
+        </p>
+
+        <div id="test-mail-options" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+            <!-- JS ile doldurulur -->
+        </div>
+
+        <div id="test-custom-wrap" class="form-group" style="display:none">
+            <label class="form-label">Özel Adres</label>
+            <input type="email" class="form-input" id="test-custom-inp"
+                   placeholder="ozel@adres.com">
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeModal('modal-test-mail')">İptal</button>
+            <button class="btn btn-primary" id="test-send-btn" onclick="doTestMail()">Gönder</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let _cfg  = null;
+let _lists = { rcp: [], err: [] };
+
+async function loadSettings() {
+    _cfg = await api('GET', '/settings/api');
+    _lists.rcp = [...(_cfg.email.recipients      || [])];
+    _lists.err = [...(_cfg.email.error_recipients || [])];
+    render('rcp');
+    render('err');
+}
+
+function render(key) {
+    const wrpId = key === 'rcp' ? 'rcp-wrap' : 'err-wrap';
+    const cntId = key === 'rcp' ? 'cnt-r'    : 'cnt-e';
+    const el    = document.getElementById(wrpId);
+    const cnt   = document.getElementById(cntId);
+    if (cnt) cnt.textContent = _lists[key].length;
+    if (!el) return;
+    el.innerHTML = _lists[key].map((m, i) => `
+        <span class="chip">
+            ${m}
+            <button class="chip-remove" onclick="removeEmail('${key}',${i})">×</button>
+        </span>`).join('');
+}
+
+function addEmail(key) {
+    const inpId = key === 'rcp' ? 'inp-rcp' : 'inp-err';
+    const inp   = document.getElementById(inpId);
+    const val   = inp.value.trim();
+    if (!val || !val.includes('@')) { showToast('Geçerli bir e-posta girin', 'error'); return; }
+    if (_lists[key].includes(val))  { showToast('Bu adres zaten listede', 'error');   return; }
+    _lists[key].push(val); inp.value = '';
+    render(key);
+}
+
+function removeEmail(key, i) { _lists[key].splice(i, 1); render(key); }
+
+async function saveAll() {
+    if (!_cfg) { showToast('Ayarlar yüklenemedi, sayfayı yenileyin', 'error'); return; }
+    _cfg.email.recipients       = [..._lists.rcp];
+    _cfg.email.error_recipients = [..._lists.err];
+    try {
+        await api('POST', '/settings/api', _cfg);
+        showToast('Mail listeleri kaydedildi ✓', 'success');
+    } catch(e) { showToast('Hata: ' + e.message, 'error'); }
+}
+
+/* ── Test maili modalı ─────────────────────────────────────────────────────── */
+function openTestMailModal() {
+    const allAddresses = [...new Set([..._lists.rcp, ..._lists.err])];
+    const optWrap = document.getElementById('test-mail-options');
+    const customWrap = document.getElementById('test-custom-wrap');
+    customWrap.style.display = 'none';
+
+    if (!allAddresses.length) {
+        optWrap.innerHTML = `
+            <div class="text-muted" style="font-size:13px;padding:8px">
+                Henüz kayıtlı adres yok. Önce rapor veya hata alıcısı ekleyin.
+            </div>`;
+    } else {
+        optWrap.innerHTML = allAddresses.map((addr, i) => `
+            <label style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+                          border:1px solid var(--border);border-radius:var(--r-sm);
+                          cursor:pointer;transition:background .12s"
+                   onmouseover="this.style.background='var(--surface-2)'"
+                   onmouseout="this.style.background=''">
+                <input type="radio" name="test_addr" value="${addr}"
+                       ${i===0?'checked':''} style="accent-color:var(--accent)">
+                <span style="font-size:13px">${addr}</span>
+            </label>`).join('') + `
+            <label style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+                          border:1px solid var(--border);border-radius:var(--r-sm);
+                          cursor:pointer;transition:background .12s"
+                   onmouseover="this.style.background='var(--surface-2)'"
+                   onmouseout="this.style.background=''">
+                <input type="radio" name="test_addr" value="__custom__"
+                       style="accent-color:var(--accent)"
+                       onchange="toggleCustomInput(this)">
+                <span style="font-size:13px">Özel adres gir...</span>
+            </label>`;
+    }
+    openModal('modal-test-mail');
+}
+
+function toggleCustomInput(radio) {
+    document.getElementById('test-custom-wrap').style.display =
+        radio.value === '__custom__' ? 'block' : 'none';
+    document.querySelectorAll('input[name=test_addr]').forEach(r => {
+        if (r !== radio) r.addEventListener('change', () => {
+            document.getElementById('test-custom-wrap').style.display = 'none';
+        }, {once: true});
+    });
+}
+
+async function doTestMail() {
+    const selected = document.querySelector('input[name=test_addr]:checked');
+    if (!selected) { showToast('Bir adres seçin', 'error'); return; }
+
+    let to = selected.value;
+    if (to === '__custom__') {
+        to = document.getElementById('test-custom-inp').value.trim();
+        if (!to || !to.includes('@')) { showToast('Geçerli bir adres girin', 'error'); return; }
+    }
+
+    const btn = document.getElementById('test-send-btn');
+    btn.disabled = true; btn.textContent = '⏳ Gönderiliyor...';
+
+    try {
+        // Geçici olarak seçilen adresi recipients'a ekleyip test et
+        const cfg = await api('GET', '/settings/api');
+        const savedRecipients = cfg.email.recipients;
+        cfg.email.recipients = [to];
+        await api('POST', '/settings/api', cfg);
+
+        const result = await api('POST', '/settings/api/test-mail');
+
+        // Eski listeyi geri yükle
+        cfg.email.recipients = savedRecipients;
+        await api('POST', '/settings/api', cfg);
+
+        closeModal('modal-test-mail');
+        showToast(`Test maili gönderildi → ${to}`, 'success');
+    } catch(e) {
+        showToast('Test mail hatası: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Gönder';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', loadSettings);
+</script>
+{% endblock %}
