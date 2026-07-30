@@ -90,3 +90,13 @@ from panel2_fiyat.scrapers import site_starakim          # noqa: E402, F401
 from panel2_fiyat.scrapers import site_elektrix          # noqa: E402, F401
 from panel2_fiyat.scrapers import site_elektrikmarket    # noqa: E402, F401
 from panel2_fiyat.scrapers import site_tumpaelektrik     # noqa: E402, F401
+from panel2_fiyat.scrapers import site_zeybekmarket      # noqa: E402, F401
+from panel2_fiyat.scrapers import site_elektrikmalzemesi # noqa: E402, F401
+from panel2_fiyat.scrapers import site_elektrikciden     # noqa: E402, F401
+from panel2_fiyat.scrapers import site_ucfaz             # noqa: E402, F401
+from panel2_fiyat.scrapers import site_aydinlatmadunyam  # noqa: E402, F401
+from panel2_fiyat.scrapers import site_cimenelektrik      # noqa: E402, F401
+from panel2_fiyat.scrapers import site_kozaydinlatma      # noqa: E402, F401
+from panel2_fiyat.scrapers import site_krcelektromarket   # noqa: E402, F401
+from panel2_fiyat.scrapers import site_buyukalpler        # noqa: E402, F401
+from panel2_fiyat.scrapers import site_competitors       # noqa: E402, F401

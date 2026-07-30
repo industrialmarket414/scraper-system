@@ -18,6 +18,8 @@ Her site wrapper'ı sadece config sağlar:
 import asyncio
 import json
 import re
+import shutil
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 
@@ -29,6 +31,38 @@ UA = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/125.0.0.0 Safari/537.36"
 )
+
+
+async def _launch_chromium(playwright, *, headless: bool):
+    """Playwright Chromium yoksa makinedeki Chrome/Edge ile devam et."""
+    launch_args = {
+        "headless": headless,
+        "args": [
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-extensions",
+        ],
+    }
+    try:
+        return await playwright.chromium.launch(**launch_args)
+    except Exception as original_error:
+        candidates = [
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            shutil.which("google-chrome"),
+            shutil.which("chrome"),
+            shutil.which("msedge"),
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]
+        for executable in candidates:
+            if executable and Path(executable).is_file():
+                return await playwright.chromium.launch(
+                    executable_path=str(executable), **launch_args
+                )
+        raise original_error
 
 
 def _parse_tr_price(text: str) -> Optional[float]:
@@ -123,7 +157,7 @@ def _jsonld_to_product(p: dict, base_url: str) -> Optional[dict]:
     try:
         price_f = float(price) if price is not None else None
     except (ValueError, TypeError):
-        price_f = None
+        price_f = _parse_tr_price(str(price)) if price is not None else None
 
     if not name and not sku:
         return None
@@ -217,6 +251,7 @@ async def _read_card(card, base_url: str, site_selectors: Optional[dict] = None)
     brand = await _first_text(card, sel_brand)
     price_text = await _first_text(card, sel_price)
     old_price_text = await _first_text(card, sel_old)
+    code = await _read_product_code(card, site_selectors)
 
     # URL
     url = ""
@@ -232,6 +267,9 @@ async def _read_card(card, base_url: str, site_selectors: Optional[dict] = None)
     if not name and not price_text:
         return None
 
+    if not code:
+        code = _infer_product_code(name)
+
     price = _parse_tr_price(price_text)
     old_price = _parse_tr_price(old_price_text) if old_price_text else None
     discount = None
@@ -239,7 +277,7 @@ async def _read_card(card, base_url: str, site_selectors: Optional[dict] = None)
         discount = round((old_price - price) / old_price * 100, 1)
 
     return {
-        "product_code": "",
+        "product_code": code,
         "product_name": name,
         "brand":        brand,
         "price":        price,
@@ -261,6 +299,52 @@ async def _first_text(card, selectors: list[str]) -> str:
                     return t
         except Exception:
             continue
+    return ""
+
+
+async def _read_product_code(card, site_selectors: Optional[dict]) -> str:
+    """Karttan stok/üretici kodunu mümkün olan en güvenli kaynaklardan al."""
+    if site_selectors and site_selectors.get("code"):
+        selector = site_selectors["code"]
+        attr = site_selectors.get("code_attr")
+        try:
+            el = card.locator(selector).first
+            if await el.count():
+                value = await el.get_attribute(attr) if attr else await el.inner_text()
+                if value:
+                    return str(value).strip()
+        except Exception:
+            pass
+
+    for attr in ("data-product-code", "data-product-sku", "data-sku"):
+        try:
+            value = await card.get_attribute(attr)
+            if value:
+                return str(value).strip()
+        except Exception:
+            continue
+    return ""
+
+
+def _infer_product_code(name: str) -> str:
+    """
+    Liste kartında ayrı stok kodu yoksa ürün adındaki güçlü model kodunu bulur.
+    Ölçü/güç değerleri (8W, 220V, 6500K gibi) ürün kodu sayılmaz.
+    """
+    if not name:
+        return ""
+    separated = re.findall(
+        r"(?<![\w])[A-Za-z0-9]+(?:[-/.][A-Za-z0-9]+)+(?![\w])", name
+    )
+    compact = re.findall(r"(?<![\w])[A-Za-z0-9]{4,24}(?![\w])", name)
+    candidates = separated + compact
+    ignored = re.compile(r"^\d+(?:W|V|A|K|MM|CM|MT|HZ|MAH|LM)$", re.I)
+    for candidate in candidates:
+        code = candidate.strip("-/.")
+        digit_count = sum(ch.isdigit() for ch in code)
+        has_letter = any(ch.isalpha() for ch in code)
+        if code and has_letter and digit_count >= 2 and not ignored.match(code):
+            return code
     return ""
 
 
@@ -331,15 +415,7 @@ async def run_generic_scraper(
 
     async with async_playwright() as p:
         # --disable-dev-shm-usage: uzun taramalarda "Target crashed" önler
-        browser = await p.chromium.launch(
-            headless=headless,
-            args=[
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-gpu",
-                "--disable-extensions",
-            ],
-        )
+        browser = await _launch_chromium(p, headless=headless)
         context = await browser.new_context(
             viewport={"width": 1400, "height": 900},
             user_agent=UA,

@@ -1,5 +1,22 @@
 from core.database import get_conn
 from core.config_manager import load_settings
+from datetime import datetime, timedelta
+from threading import Lock
+
+
+_batch_time_lock = Lock()
+_last_batch_time: datetime | None = None
+
+
+def _next_batch_timestamp() -> str:
+    """Aynı saat çözünürlüğünde başlayan eşzamanlı çekimlere de benzersiz kimlik ver."""
+    global _last_batch_time
+    with _batch_time_lock:
+        now = datetime.now()
+        if _last_batch_time is not None and now <= _last_batch_time:
+            now = _last_batch_time + timedelta(microseconds=1)
+        _last_batch_time = now
+        return now.strftime("%Y-%m-%d %H:%M:%S.%f")
 
 
 def save_products(site_id: str, site_name: str, products: list[dict]):
@@ -8,6 +25,7 @@ def save_products(site_id: str, site_name: str, products: list[dict]):
     """
     settings    = load_settings()
     max_records = settings.get("price_max_records", 30)
+    batch_at    = _next_batch_timestamp()
 
     # EM kodu eşleştirmesi (Panel 1 ile aynı product_mapping tablosu)
     try:
@@ -25,8 +43,8 @@ def save_products(site_id: str, site_name: str, products: list[dict]):
                 """INSERT INTO price_records
                    (site_id, site_name, product_code, product_name, brand, category,
                     price, old_price, list_price, discount_percent,
-                    currency, is_bestseller, bestseller_label, em_code, url)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    currency, is_bestseller, bestseller_label, em_code, url, scraped_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     site_id, site_name,
                     code,
@@ -42,15 +60,18 @@ def save_products(site_id: str, site_name: str, products: list[dict]):
                     p.get("bestseller_label"),
                     em or None,
                     p.get("url"),
+                    batch_at,
                 ),
             )
 
-        # Rolling window: site başına en fazla max_records kayıt
+        # max_records ürün adedi değil, tam çekim/snapshot adedidir. Böylece son
+        # kategorideki 30 ürün dışındaki tüm güncel ürünlerin silinmesi önlenir.
         conn.execute(
             """DELETE FROM price_records
-               WHERE site_id = ? AND id NOT IN (
-                   SELECT id FROM price_records
+               WHERE site_id = ? AND scraped_at NOT IN (
+                   SELECT scraped_at FROM price_records
                    WHERE site_id = ?
+                   GROUP BY scraped_at
                    ORDER BY scraped_at DESC
                    LIMIT ?
                )""",

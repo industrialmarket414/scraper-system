@@ -18,6 +18,14 @@ async def run_all_price_sites():
             scraper = get_scraper(site)
             products = await scraper.run()
             save_products(site["id"], site["name"], products)
+            if getattr(scraper, "EXPORT_EXCEL", False):
+                from panel2_fiyat.excel_exporter import export_price_excel
+                output = export_price_excel(
+                    site["name"], site["id"], products,
+                    columns=getattr(scraper, "EXCEL_COLUMNS", None),
+                )
+                add_log("panel2", site["id"], site["name"], "success",
+                        f"Excel oluşturuldu: {output.name}")
         except Exception as e:
             # notify=True → tek hata maili add_log üzerinden gönderilir
             add_log("panel2", site["id"], site["name"], "error",
@@ -31,6 +39,14 @@ async def run_single_price_site(site_config: dict):
     scraper = get_scraper(site_config)
     products = await scraper.run()
     save_products(site_config["id"], site_config["name"], products)
+    if getattr(scraper, "EXPORT_EXCEL", False):
+        from panel2_fiyat.excel_exporter import export_price_excel
+        output = export_price_excel(
+            site_config["name"], site_config["id"], products,
+            columns=getattr(scraper, "EXCEL_COLUMNS", None),
+        )
+        add_log("panel2", site_config["id"], site_config["name"], "success",
+                f"Excel oluşturuldu: {output.name}")
 
 
 def start_scheduler():

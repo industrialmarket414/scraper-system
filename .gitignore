@@ -19,6 +19,7 @@ logs/
 *.log
 .codex-tmp/
 panel1_b2b/outputs/
+panel2_fiyat/outputs/
 
 # Editors and operating systems
 .idea/

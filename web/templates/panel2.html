@@ -57,6 +57,11 @@
                             <td>
                                 <div class="flex gap-8">
                                     <button class="btn btn-primary btn-sm" onclick="runSite('{{ s.id }}',this)">▶ Tara</button>
+                                    {% if s.id in ['starakim', 'elektromarketim', 'elektrix', 'elektrikmarket', 'tumpaelektrik', 'zeybekmarket', 'elektrikmalzemesi', 'elektrikciden', 'ucfaz', 'aydinlatmadunyam', 'cimenelektrik', 'kozaydinlatma', 'krcelektromarket', 'buyukalpler'] %}
+                                    <a class="btn btn-success btn-sm"
+                                       href="/panel2/api/download/{{ s.id }}"
+                                       title="Son oluşan Excel'i indir">↓ Excel</a>
+                                    {% endif %}
                                     <button class="btn btn-ghost btn-sm"
                                             onclick="document.getElementById('logo-file-{{ s.id }}').click()"
                                             title="Logo yükle">🖼 Logo</button>
@@ -110,9 +115,10 @@
                 <table id="cmp-table">
                     <thead><tr>
                         <th>EM Kodu</th><th>Bizim Fiyat</th><th>Rakip Ort.</th>
-                        <th>Min Rakip</th><th>Fark</th><th>Sıra</th><th>Durum</th>
+                        <th>Min Rakip</th><th>Hedef Fiyat</th><th>Gerekli Toplam İskonto</th>
+                        <th>Ek İskonto</th><th>Fark</th><th>Sıra</th><th>Durum</th>
                     </tr></thead>
-                    <tbody><tr><td colspan="7" class="text-muted" style="text-align:center;padding:32px">"Getir" butonuna basın</td></tr></tbody>
+                    <tbody><tr><td colspan="10" class="text-muted" style="text-align:center;padding:32px">"Getir" butonuna basın</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -272,28 +278,39 @@ const VERDICT_LABELS = {
 
 async function loadComparison() {
     const tb = document.querySelector('#cmp-table tbody');
-    tb.innerHTML = emp(7, '⏳ Yükleniyor...');
+    tb.innerHTML = emp(10, '⏳ Yükleniyor...');
     try {
         const d = await api('GET', '/panel2/api/comparison/all');
         if (!d.length) {
-            tb.innerHTML = emp(7, 'Karşılaştırılacak veri yok. Önce "Bizim Katalog" sitesi işaretleyip ürün eşleştirmesi yükleyin.');
+            tb.innerHTML = emp(10, 'Karşılaştırılacak veri yok. Önce "Bizim Katalog" sitesi işaretleyip ürün eşleştirmesi yükleyin.');
             return;
         }
         tb.innerHTML = d.map(c => {
             const pos = c.position;
-            if (!pos) return `<tr><td>${c.em_code}</td><td colspan="6" class="text-muted">Rakip verisi yok</td></tr>`;
+            if (!pos) return `<tr><td>${c.em_code}</td><td colspan="9" class="text-muted">Rakip verisi yok</td></tr>`;
             const diffColor = pos.diff_vs_avg < 0 ? '#16a34a' : pos.diff_vs_avg > 0 ? '#dc2626' : '#64748b';
+            const offer = pos.discount_offer;
+            const target = offer ? `${f2(offer.target_price)} ₺` : '—';
+            const totalDiscount = offer?.required_total_discount_percent != null
+                ? `%${f2(offer.required_total_discount_percent)}` : 'Liste fiyatı yok';
+            const extraDiscount = offer
+                ? (offer.already_best ? '<span style="color:#16a34a">Gerekmez</span>'
+                    : `<b style="color:#dc2626">%${f2(offer.additional_discount_percent)}</b>`)
+                : '—';
             return `<tr>
                 <td><b>${c.em_code}</b></td>
                 <td>${f2(pos.our_price)} ₺</td>
                 <td>${f2(c.stats.avg_price)} ₺</td>
                 <td>${f2(c.stats.min_price)} ₺</td>
+                <td>${target}</td>
+                <td>${totalDiscount}</td>
+                <td>${extraDiscount}</td>
                 <td style="color:${diffColor};font-weight:600">${pos.diff_vs_avg>0?'+':''}${f2(pos.diff_vs_avg)} ₺</td>
                 <td>${pos.rank||'—'}/${pos.total||'—'}</td>
                 <td>${VERDICT_LABELS[pos.verdict]||pos.verdict}</td>
             </tr>`;
         }).join('');
-    } catch(e) { tb.innerHTML = emp(7, 'Hata: '+e.message); }
+    } catch(e) { tb.innerHTML = emp(10, 'Hata: '+e.message); }
 }
 
 async function loadAdvantage() {

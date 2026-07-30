@@ -15,6 +15,9 @@ from core.database import get_conn
 from core.config_manager import load_settings
 
 
+PRICE_STEP = 0.01
+
+
 def _our_site_ids() -> list[str]:
     """is_our_catalog=true olan site id'leri."""
     return [
@@ -100,6 +103,7 @@ def compare_em(em_code: str) -> dict:
             "is_cheapest":     rank == 1 if rank else False,
             "is_most_expensive": rank == len(ranked) if rank else False,
             "verdict":         _classify(our_price, prices),
+            "discount_offer":  _discount_offer(our_row, competitors),
         }
 
     return {
@@ -108,6 +112,56 @@ def compare_em(em_code: str) -> dict:
         "competitors": competitors,
         "stats":       stats,
         "position":    position,
+    }
+
+
+def _discount_offer(our_row: dict, competitors: list[dict]) -> dict | None:
+    """En ucuz rakibi 0,01 TL geçmek için gereken iskontoyu hesaplar."""
+    our_price = our_row.get("price")
+    priced_competitors = [
+        r for r in competitors
+        if r.get("price") is not None and r["price"] >= 0
+    ]
+    if our_price is None or not priced_competitors:
+        return None
+
+    cheapest = min(priced_competitors, key=lambda r: r["price"])
+    competitor_price = float(cheapest["price"])
+    already_best = float(our_price) <= competitor_price
+    target_price = round(
+        float(our_price) if already_best else max(0.0, competitor_price - PRICE_STEP),
+        2,
+    )
+
+    list_price = our_row.get("list_price") or our_row.get("old_price")
+    required_total = None
+    current_total = None
+    if list_price is not None and float(list_price) > 0:
+        list_price = float(list_price)
+        required_total = round(
+            max(0.0, min(100.0, (1 - target_price / list_price) * 100)), 2
+        )
+        current_total = round(
+            max(0.0, min(100.0, (1 - float(our_price) / list_price) * 100)), 2
+        )
+
+    additional_rate = round(
+        max(0.0, (float(our_price) - target_price) / float(our_price) * 100), 2
+    ) if float(our_price) > 0 else 0.0
+
+    return {
+        "competitor_site_id": cheapest.get("site_id"),
+        "competitor_site_name": cheapest.get("site_name"),
+        "competitor_price": competitor_price,
+        "target_price": target_price,
+        "list_price": list_price,
+        "current_total_discount_percent": current_total,
+        "required_total_discount_percent": required_total,
+        "additional_discount_percent": additional_rate,
+        "additional_reduction_amount": round(
+            max(0.0, float(our_price) - target_price), 2
+        ),
+        "already_best": already_best,
     }
 
 

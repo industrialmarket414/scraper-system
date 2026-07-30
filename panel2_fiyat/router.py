@@ -1,6 +1,6 @@
 import shutil
 from fastapi import APIRouter, Request, BackgroundTasks, File, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from core.config_manager import load_settings, save_settings
@@ -50,6 +50,31 @@ async def run_site(site_id: str, background_tasks: BackgroundTasks):
         return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
     background_tasks.add_task(run_single_price_site, site)
     return {"status": "started", "site_id": site_id}
+
+
+@router.get("/api/download/{site_id}")
+async def download_excel(site_id: str):
+    from panel2_fiyat.excel_exporter import latest_output
+    settings = load_settings()
+    site = next(
+        (s for s in settings.get("price_sites", []) if s["id"] == site_id),
+        None,
+    )
+    if not site:
+        return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
+    output = latest_output(site_id)
+    if not output:
+        return JSONResponse(
+            {"error": "Henüz Excel oluşmadı. Önce siteyi tarayın."},
+            status_code=404,
+        )
+    return FileResponse(
+        output,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        filename=output.name,
+    )
 
 
 # ── Analiz sorguları ──────────────────────────────────────────────────────────

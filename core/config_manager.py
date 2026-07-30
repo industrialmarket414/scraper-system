@@ -36,13 +36,86 @@ _DEFAULT = {
     "claude_model":      "claude-sonnet-4-5",
 }
 
+_COMPETITOR_MIGRATION_KEY = "price_competitors_2026_07"
+_SITE_NAME_MIGRATION_KEY = "price_site_names_2026_07"
+_PRICE_COMPETITORS = [
+    ("zeybekmarket", "Zeybek Market", "https://zeybekmarket.com"),
+    ("elektrikmalzemesi", "Elektrik Malzemesi", "https://www.elektrikmalzemesi.com"),
+    ("elektrikciden", "Elektrikçiden", "https://www.elektrikciden.com"),
+    ("ucfaz", "3Faz", "https://www.3faz.com"),
+    ("aydinlatmadunyam", "Aydınlatma Dünyam", "https://www.aydinlatmadunyam.com"),
+    ("cimenelektrik", "Çimen Elektrik", "https://www.cimenelektrik.com"),
+    ("kozaydinlatma", "Koz Aydınlatma", "https://www.kozaydinlatma.com"),
+    ("krcelektromarket", "KRC Elektromarket", "https://www.krcelektromarket.com"),
+    ("buyukalpler", "Büyükalpler", "https://www.buyukalpler.com.tr"),
+]
+
+
+def _apply_settings_migrations(settings: dict) -> bool:
+    migrations = settings.setdefault("settings_migrations", {})
+    changed = False
+    price_sites = settings.setdefault("price_sites", [])
+
+    if not migrations.get(_COMPETITOR_MIGRATION_KEY):
+        existing_ids = {site.get("id") for site in price_sites}
+        for site_id, name, url in _PRICE_COMPETITORS:
+            if site_id in existing_ids:
+                continue
+            price_sites.append({
+                "id": site_id,
+                "name": name,
+                "url": url,
+                "username": "",
+                "password": "",
+                "logo_url": "",
+                "enabled": True,
+                "brands": [],
+                "is_our_catalog": False,
+            })
+        migrations[_COMPETITOR_MIGRATION_KEY] = True
+        changed = True
+
+    if not migrations.get(_SITE_NAME_MIGRATION_KEY):
+        for site in price_sites:
+            if site.get("id") == "starakim" and site.get("name") == "Star Akim":
+                site["name"] = "Star Akım"
+                changed = True
+        migrations[_SITE_NAME_MIGRATION_KEY] = True
+        changed = True
+
+    return changed
+
 
 def load_settings() -> dict:
     if not SETTINGS_PATH.exists():
-        save_settings(_DEFAULT.copy())
-        return _DEFAULT.copy()
+        settings = {
+            **_DEFAULT,
+            "b2b_sites": [],
+            "price_sites": [],
+            "email": dict(_DEFAULT["email"]),
+            "b2b_schedule": dict(_DEFAULT["b2b_schedule"]),
+        }
+        _apply_settings_migrations(settings)
+        save_settings(settings)
+        return settings
     with open(SETTINGS_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        settings = json.load(f)
+    if _apply_settings_migrations(settings):
+        save_settings(settings)
+    return settings
+
+
+def get_mapping_sites(settings: dict | None = None) -> list[dict]:
+    """Eşleştirme Excel'i için B2B ve fiyat sitelerini tekilleştirerek birleştir."""
+    settings = settings or load_settings()
+    sites = []
+    seen = set()
+    for site in settings.get("b2b_sites", []) + settings.get("price_sites", []):
+        site_id = site.get("id")
+        if site_id and site_id not in seen:
+            sites.append(site)
+            seen.add(site_id)
+    return sites
 
 
 def save_settings(data: dict):
@@ -135,7 +208,7 @@ async def product_mapping_page(request: Request):
             "settings": settings,
             "summary":  get_summary(),
             "sample":   get_sample(50),
-            "sites":    settings.get("b2b_sites", []),
+            "sites":    get_mapping_sites(settings),
             "active":   "mapping",
         }
     )
@@ -152,7 +225,7 @@ async def product_mapping_template():
     """Boş Excel template'ini indirir."""
     from core.product_mapping import generate_template
     settings = load_settings()
-    data = generate_template(settings.get("b2b_sites", []))
+    data = generate_template(get_mapping_sites(settings))
     return Response(
         content=data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -168,7 +241,7 @@ async def product_mapping_download():
     from core.product_mapping import generate_filled_export
     from datetime import datetime
     settings = load_settings()
-    data = generate_filled_export(settings.get("b2b_sites", []))
+    data = generate_filled_export(get_mapping_sites(settings))
     fname = f"urun_eslestirme_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     return Response(
         content=data,
@@ -190,7 +263,7 @@ async def product_mapping_upload(file: UploadFile = File(...)):
 
     try:
         content = await file.read()
-        sites = load_settings().get("b2b_sites", [])
+        sites = get_mapping_sites()
         rows, info = parse_excel(content, sites)
         n = replace_all(rows)
         add_log(
