@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 
 import requests
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 
 
@@ -179,8 +180,23 @@ class ElektrikcidenScraper(BasePriceScraper):
             1,
             int(os.getenv("ELEKTRIKCIDEN_MAX_PRODUCTS", "10000") or 10000),
         )
+        if self.should_stop():
+            raise ScrapeCancelled("Elektrikciden cekimi durduruldu")
+        print("Elektrikciden: katalog verisi aliniyor.", flush=True)
         payload = await asyncio.to_thread(_fetch_catalog, limit)
+        if self.should_stop():
+            raise ScrapeCancelled("Elektrikciden cekimi durduruldu")
         rows = _parse_products(payload, scraped_at)
+        for completed in range(250, len(rows) + 250, 250):
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrikciden cekimi durduruldu")
+            shown = min(completed, len(rows))
+            print(
+                f"Elektrikciden: {shown}/{len(rows)} urun hazirlandi.",
+                flush=True,
+            )
+            if shown == len(rows):
+                break
 
         unique = {}
         for row in rows:

@@ -1,14 +1,21 @@
-import shutil
+﻿import shutil
 from fastapi import APIRouter, Request, BackgroundTasks, File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from core.config_manager import load_settings, save_settings
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.analyzer import (
     get_bestsellers, get_most_discounted, get_cheapest, search_combined
 )
 from panel2_fiyat.database import get_latest_products
-from panel2_fiyat.scheduler import run_all_price_sites, run_single_price_site, reload_scheduler
+from panel2_fiyat.scheduler import (
+    clear_run_status,
+    get_run_status,
+    reload_scheduler,
+    run_all_price_sites,
+    run_single_price_site,
+)
 from panel2_fiyat.ai_analyzer import (
     run_analysis, get_analysis_state, get_reports, get_report_by_id
 )
@@ -35,7 +42,7 @@ async def panel2_page(request: Request):
     )
 
 
-# ── Scrape ────────────────────────────────────────────────────────────────────
+# â”€â”€ Scrape â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/api/run/all", response_class=JSONResponse)
 async def run_all(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_all_price_sites)
@@ -47,9 +54,35 @@ async def run_site(site_id: str, background_tasks: BackgroundTasks):
     settings = load_settings()
     site = next((s for s in settings.get("price_sites", []) if s["id"] == site_id), None)
     if not site:
-        return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Site bulunamadÄ±"}, status_code=404)
+    current = get_run_status(site_id)
+    if current.get("running"):
+        return JSONResponse(
+            {"error": "Bu site icin tarama zaten calisiyor", "status": current},
+            status_code=409,
+        )
     background_tasks.add_task(run_single_price_site, site)
     return {"status": "started", "site_id": site_id}
+
+
+@router.get("/api/run/status", response_class=JSONResponse)
+async def run_status_all():
+    return get_run_status()
+
+
+@router.get("/api/run/status/{site_id}", response_class=JSONResponse)
+async def run_status_site(site_id: str):
+    return get_run_status(site_id)
+
+
+@router.post("/api/run/stop/{site_id}", response_class=JSONResponse)
+async def stop_site(site_id: str):
+    settings = load_settings()
+    site = next((s for s in settings.get("price_sites", []) if s["id"] == site_id), None)
+    if not site:
+        return JSONResponse({"error": "Site bulunamadÃ„Â±"}, status_code=404)
+    status = clear_run_status(site_id)
+    return {"status": "stopped", "site_id": site_id, "run_status": status}
 
 
 @router.get("/api/download/{site_id}")
@@ -61,11 +94,22 @@ async def download_excel(site_id: str):
         None,
     )
     if not site:
-        return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Site bulunamadi"}, status_code=404)
+    current = get_run_status(site_id)
+    if current.get("running"):
+        minutes = current.get("elapsed_minutes")
+        suffix = f" ({minutes} dk oldu)" if minutes is not None else ""
+        return JSONResponse(
+            {
+                "error": f"Bu site icin Excel hazirlaniyor{suffix}. Bitince tekrar indirin.",
+                "status": current,
+            },
+            status_code=409,
+        )
     output = latest_output(site_id)
     if not output:
         return JSONResponse(
-            {"error": "Henüz Excel oluşmadı. Önce siteyi tarayın."},
+            {"error": "Henuz Excel olusmadi. Once Tara butonuyla siteyi cekin veya zamanlanmis cekimi bekleyin."},
             status_code=404,
         )
     return FileResponse(
@@ -74,10 +118,15 @@ async def download_excel(site_id: str):
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         ),
         filename=output.name,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
     )
 
 
-# ── Analiz sorguları ──────────────────────────────────────────────────────────
+# â”€â”€ Analiz sorgularÄ± â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.get("/api/products",            response_class=JSONResponse)
 async def products(site_id: str = None, limit: int = 100):
     return get_latest_products(site_id=site_id, limit=limit)
@@ -99,12 +148,12 @@ async def search(q: str, limit: int = 50):
     return search_combined(query=q, limit=limit)
 
 
-# ── AI Analiz ─────────────────────────────────────────────────────────────────
+# â”€â”€ AI Analiz â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.post("/api/ai/analyze", response_class=JSONResponse)
 async def ai_analyze(background_tasks: BackgroundTasks):
     state = get_analysis_state()
     if state["running"]:
-        return JSONResponse({"error": "Analiz zaten çalışıyor"}, status_code=409)
+        return JSONResponse({"error": "Analiz zaten Ã§alÄ±ÅŸÄ±yor"}, status_code=409)
     background_tasks.add_task(run_analysis)
     return {"status": "started"}
 
@@ -120,7 +169,7 @@ async def ai_reports(limit: int = 20):
 async def ai_report(report_id: int):
     r = get_report_by_id(report_id)
     if not r:
-        return JSONResponse({"error": "Rapor bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Rapor bulunamadÄ±"}, status_code=404)
     return r
 
 @router.post("/api/reload-scheduler", response_class=JSONResponse)
@@ -129,38 +178,38 @@ async def reload_sched():
     return {"status": "ok"}
 
 
-# ── Karşılaştırma & Avantaj Analizi ───────────────────────────────────────────
+# â”€â”€ KarÅŸÄ±laÅŸtÄ±rma & Avantaj Analizi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.get("/api/comparison/em/{em_code}", response_class=JSONResponse)
 async def comparison_em(em_code: str):
-    """Tek bir EM ürünü için detaylı karşılaştırma."""
+    """Tek bir EM Ã¼rÃ¼nÃ¼ iÃ§in detaylÄ± karÅŸÄ±laÅŸtÄ±rma."""
     return cmp_mod.compare_em(em_code)
 
 
 @router.get("/api/comparison/all", response_class=JSONResponse)
 async def comparison_all():
-    """Bizim katalogumuzdaki tüm EM ürünleri karşılaştırması."""
+    """Bizim katalogumuzdaki tÃ¼m EM Ã¼rÃ¼nleri karÅŸÄ±laÅŸtÄ±rmasÄ±."""
     return cmp_mod.compare_all()
 
 
 @router.get("/api/advantage/report", response_class=JSONResponse)
 async def advantage_report():
-    """Avantajlı/geride sınıflandırması — özet + bucket'lar."""
+    """AvantajlÄ±/geride sÄ±nÄ±flandÄ±rmasÄ± â€” Ã¶zet + bucket'lar."""
     return adv_mod.full_report()
 
 
 @router.get("/api/advantage/top", response_class=JSONResponse)
 async def advantage_top(limit: int = 20):
-    """En çok avantajlı olduğumuz ürünler (en büyük negatif fark)."""
+    """En Ã§ok avantajlÄ± olduÄŸumuz Ã¼rÃ¼nler (en bÃ¼yÃ¼k negatif fark)."""
     return adv_mod.top_advantages(limit=limit)
 
 
 @router.get("/api/advantage/bottom", response_class=JSONResponse)
 async def advantage_bottom(limit: int = 20):
-    """En çok geride olduğumuz ürünler (en büyük pozitif fark)."""
+    """En Ã§ok geride olduÄŸumuz Ã¼rÃ¼nler (en bÃ¼yÃ¼k pozitif fark)."""
     return adv_mod.top_disadvantages(limit=limit)
 
 
-# ── Bestseller Analizi ────────────────────────────────────────────────────────
+# â”€â”€ Bestseller Analizi â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @router.get("/api/bestseller/by-site", response_class=JSONResponse)
 async def bestseller_by_site(limit_per_site: int = 50):
     return bs_mod.by_site(limit_per_site=limit_per_site)
@@ -168,23 +217,23 @@ async def bestseller_by_site(limit_per_site: int = 50):
 
 @router.get("/api/bestseller/common", response_class=JSONResponse)
 async def bestseller_common(min_sites: int = 2, limit: int = 100):
-    """Birden fazla sitede bestseller olan ürünler."""
+    """Birden fazla sitede bestseller olan Ã¼rÃ¼nler."""
     return bs_mod.common_bestsellers(min_sites=min_sites, limit=limit)
 
 
 @router.get("/api/bestseller/missing", response_class=JSONResponse)
 async def bestseller_missing(min_sites: int = 2, limit: int = 100):
-    """Bestseller olduğu halde bizde olmayan ürünler."""
+    """Bestseller olduÄŸu halde bizde olmayan Ã¼rÃ¼nler."""
     return bs_mod.missing_in_our_catalog(min_sites=min_sites, limit=limit)
 
 
 @router.get("/api/bestseller/brands", response_class=JSONResponse)
 async def bestseller_brands(limit: int = 30):
-    """Bestseller'larda marka dağılımı."""
+    """Bestseller'larda marka daÄŸÄ±lÄ±mÄ±."""
     return bs_mod.brand_distribution(limit=limit)
 
 
-# ── Logo upload (Panel 1 ile aynı pattern) ───────────────────────────────────
+# â”€â”€ Logo upload (Panel 1 ile aynÄ± pattern) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _update_price_site(site_id: str, updates: dict) -> bool:
     s = load_settings()
     for site in s.get("price_sites", []):
@@ -200,7 +249,7 @@ async def upload_logo(site_id: str, logo: UploadFile = File(...)):
     settings = load_settings()
     site = next((s for s in settings.get("price_sites", []) if s["id"] == site_id), None)
     if not site:
-        return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Site bulunamadÄ±"}, status_code=404)
 
     # Eski logoyu temizle
     for old in LOGOS_DIR.glob(f"price_{site_id}.*"):
@@ -215,7 +264,7 @@ async def upload_logo(site_id: str, logo: UploadFile = File(...)):
     _update_price_site(site_id, {"logo_url": logo_url})
 
     from core.log_manager import add_log
-    add_log("panel2", site_id, site["name"], "info", f"{site['name']} — Logo güncellendi")
+    add_log("panel2", site_id, site["name"], "info", f"{site['name']} â€” Logo gÃ¼ncellendi")
     return {"status": "ok", "logo_url": logo_url}
 
 
@@ -224,7 +273,7 @@ async def delete_logo(site_id: str):
     settings = load_settings()
     site = next((s for s in settings.get("price_sites", []) if s["id"] == site_id), None)
     if not site:
-        return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Site bulunamadÄ±"}, status_code=404)
     for old in LOGOS_DIR.glob(f"price_{site_id}.*"):
         old.unlink(missing_ok=True)
     _update_price_site(site_id, {"logo_url": None})
@@ -233,9 +282,9 @@ async def delete_logo(site_id: str):
 
 @router.post("/api/site/{site_id}/our-catalog", response_class=JSONResponse)
 async def toggle_our_catalog(site_id: str, request: Request):
-    """Bir fiyat sitesini 'Bizim Katalog' olarak işaretle/kaldır."""
+    """Bir fiyat sitesini 'Bizim Katalog' olarak iÅŸaretle/kaldÄ±r."""
     data = await request.json()
     flag = bool(data.get("is_our_catalog"))
     if not _update_price_site(site_id, {"is_our_catalog": flag}):
-        return JSONResponse({"error": "Site bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Site bulunamadÄ±"}, status_code=404)
     return {"status": "ok", "is_our_catalog": flag}

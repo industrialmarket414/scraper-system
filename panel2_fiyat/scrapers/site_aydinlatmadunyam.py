@@ -6,18 +6,19 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from datetime import datetime
 from urllib.parse import urljoin
 
 import requests
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 
 
 BASE_URL = "https://www.aydinlatmadunyam.com"
 SITEMAP_URL = f"{BASE_URL}/sitemap.xml"
-REQUEST_TIMEOUT = (15, 90)
+REQUEST_TIMEOUT = (10, 25)
 DEFAULT_WORKERS = 8
 
 EXCEL_COLUMNS = [
@@ -67,24 +68,40 @@ def _session() -> requests.Session:
     return session
 
 
-def _fetch_text(url: str) -> str | None:
+def _raise_if_stopped(should_stop=None) -> None:
+    if should_stop and should_stop():
+        raise ScrapeCancelled("Aydinlatma Dunyam cekimi durduruldu")
+
+
+def _sleep_with_cancel(seconds: float, should_stop=None) -> None:
+    end_at = time.time() + max(0, seconds)
+    while time.time() < end_at:
+        _raise_if_stopped(should_stop)
+        time.sleep(min(0.25, end_at - time.time()))
+
+
+def _fetch_text(url: str, should_stop=None) -> str | None:
     last_error = None
     for attempt in range(6):
+        _raise_if_stopped(should_stop)
         try:
             response = _session().get(url, timeout=REQUEST_TIMEOUT)
+            _raise_if_stopped(should_stop)
             if response.status_code in {404, 410}:
                 return None
             if response.status_code == 429:
                 wait = float(response.headers.get("Retry-After") or 3 + attempt * 2)
-                time.sleep(min(wait, 20))
+                _sleep_with_cancel(min(wait, 20), should_stop)
                 continue
             response.raise_for_status()
             response.encoding = "utf-8"
             return response.text
         except Exception as exc:
+            if isinstance(exc, ScrapeCancelled):
+                raise
             last_error = exc
             if attempt < 5:
-                time.sleep(1.0 + attempt * 1.5)
+                _sleep_with_cancel(1.0 + attempt * 1.5, should_stop)
     raise RuntimeError(f"Aydınlatma Dünyam sayfası alınamadı: {url}: {last_error}")
 
 
@@ -167,8 +184,8 @@ def _parse_product(html: str, url: str, scraped_at: str) -> dict | None:
     }
 
 
-def _product_sitemap_urls() -> list[str]:
-    index = _fetch_text(SITEMAP_URL)
+def _product_sitemap_urls(should_stop=None) -> list[str]:
+    index = _fetch_text(SITEMAP_URL, should_stop)
     if not index:
         raise RuntimeError("Aydınlatma Dünyam site haritası alınamadı.")
     return [
@@ -177,16 +194,23 @@ def _product_sitemap_urls() -> list[str]:
     ]
 
 
-def _product_urls() -> list[str]:
-    sitemap_urls = _product_sitemap_urls()
+def _product_urls(should_stop=None) -> list[str]:
+    sitemap_urls = _product_sitemap_urls(should_stop)
     product_urls = []
     failures = []
     workers = min(4, max(1, len(sitemap_urls)))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
         future_map = {
-            pool.submit(_fetch_text, url): url for url in sitemap_urls
+            pool.submit(_fetch_text, url, should_stop): url
+            for url in sitemap_urls
         }
-        for future in as_completed(future_map):
+        while future_map:
+            _raise_if_stopped(should_stop)
+            try:
+                future = next(as_completed(list(future_map), timeout=1))
+            except TimeoutError:
+                continue
             url = future_map.pop(future)
             try:
                 text = future.result() or ""
@@ -196,6 +220,11 @@ def _product_urls() -> list[str]:
                 )
             except Exception as exc:
                 failures.append(f"{url}: {exc}")
+    finally:
+        pool.shutdown(
+            wait=not (should_stop and should_stop()),
+            cancel_futures=bool(should_stop and should_stop()),
+        )
     if failures:
         raise RuntimeError(
             f"Aydınlatma Dünyam ürün site haritası eksik kaldı "
@@ -234,8 +263,10 @@ def _append_cache(path: str, url: str, row: dict | None) -> None:
         }, ensure_ascii=False) + "\n")
 
 
-def _fetch_product(url: str, scraped_at: str) -> dict | None:
-    html = _fetch_text(url)
+def _fetch_product(url: str, scraped_at: str, should_stop=None) -> dict | None:
+    _raise_if_stopped(should_stop)
+    html = _fetch_text(url, should_stop)
+    _raise_if_stopped(should_stop)
     return _parse_product(html, url, scraped_at) if html else None
 
 
@@ -249,22 +280,76 @@ class AydinlatmaDunyamScraper(BasePriceScraper):
 
     def _scrape_sync(self) -> list[dict]:
         scraped_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        urls = _product_urls()
+        if self.should_stop():
+            raise ScrapeCancelled("Aydinlatma Dunyam cekimi durduruldu")
+        urls = _product_urls(self.should_stop)
+        if self.should_stop():
+            raise ScrapeCancelled("Aydinlatma Dunyam cekimi durduruldu")
         limit = int(os.getenv("AYDINLATMADUNYAM_MAX_PRODUCTS", "0") or 0)
         if limit > 0:
             urls = urls[:limit]
+        print(
+            f"Aydinlatma Dunyam: {len(urls)} urun icin cekim basladi.",
+            flush=True,
+        )
 
-        cache_path = os.getenv("AYDINLATMADUNYAM_CACHE", "").strip()
-        cache = _load_cache(cache_path)
+        cache_root = os.getenv(
+            "SCRAPER_CACHE_DIR",
+            os.path.join(os.getcwd(), "cache"),
+        ).strip()
+        os.makedirs(cache_root, exist_ok=True)
+
+        cache_date = datetime.now().strftime("%Y-%m-%d")
+        cache_path = os.path.join(
+            cache_root,
+            f"aydinlatmadunyam_{cache_date}.jsonl",
+        )
+
+        # Günlük cache yalnızca yarım kalan bir çekime özellikle devam edilmek
+        # istendiğinde kullanılır. Varsayılan davranış tüm ürünleri siteden
+        # yeniden çekmektir; böylece aynı gün yapılan ikinci çalıştırmada eski
+        # fiyat ve stoklar güncelmiş gibi rapora taşınmaz.
+        resume_cache = os.getenv(
+            "AYDINLATMADUNYAM_RESUME_CACHE",
+            "0",
+        ).strip().casefold() in {"1", "true", "yes", "evet"}
+
+        if resume_cache:
+            cache = _load_cache(cache_path)
+            if cache:
+                print(
+                    f"Aydınlatma Dünyam: {len(cache)} ürünlük yarım çekime "
+                    "cache üzerinden devam ediliyor.",
+                    flush=True,
+                )
+        else:
+            cache = {}
+            try:
+                os.remove(cache_path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Aydınlatma Dünyam eski cache dosyası silinemedi: "
+                    f"{cache_path}: {exc}"
+                ) from exc
+            print(
+                "Aydınlatma Dünyam: güncel fiyat ve stok için tüm ürünler "
+                "yeniden çekilecek.",
+                flush=True,
+            )
+
         rows = []
         pending = []
         for url in urls:
+            if self.should_stop():
+                raise ScrapeCancelled("Aydinlatma Dunyam cekimi durduruldu")
             if url in cache:
                 cached = cache[url]
                 if cached:
-                    cached = dict(cached)
-                    cached["scraped_at"] = scraped_at
-                    rows.append(cached)
+                    # Cache satırının gerçek çekim tarihini koru; yeni çekilmiş
+                    # gibi güncel zaman damgası verme.
+                    rows.append(dict(cached))
             else:
                 pending.append(url)
 
@@ -280,12 +365,28 @@ class AydinlatmaDunyamScraper(BasePriceScraper):
         )
         failures = []
         completed = len(urls) - len(pending)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_map = {
-                pool.submit(_fetch_product, url, scraped_at): url
-                for url in pending
-            }
-            for future in as_completed(future_map):
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            pending_urls = iter(pending)
+            future_map = {}
+            for _ in range(workers):
+                try:
+                    url = next(pending_urls)
+                except StopIteration:
+                    break
+                future_map[pool.submit(
+                    _fetch_product,
+                    url,
+                    scraped_at,
+                    self.should_stop,
+                )] = url
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Aydinlatma Dunyam cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 url = future_map.pop(future)
                 try:
                     row = future.result()
@@ -295,12 +396,30 @@ class AydinlatmaDunyamScraper(BasePriceScraper):
                 except Exception as exc:
                     failures.append(f"{url}: {exc}")
                 completed += 1
-                if completed % 500 == 0 or completed == len(urls):
+                if not self.should_stop():
+                    try:
+                        next_url = next(pending_urls)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(
+                            _fetch_product,
+                            next_url,
+                            scraped_at,
+                            self.should_stop,
+                        )] = next_url
+                if completed % 250 == 0 or completed == len(urls):
                     print(
                         f"Aydınlatma Dünyam: {completed}/{len(urls)} "
                         "ürün işlendi.",
                         flush=True,
                     )
+
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if failures:
             raise RuntimeError(

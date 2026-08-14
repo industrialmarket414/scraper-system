@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 
 import requests
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 
 
@@ -164,8 +165,23 @@ class ZeybekMarketScraper(BasePriceScraper):
     async def scrape(self) -> list[dict]:
         scraped_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         limit = max(1, int(os.getenv("ZEYBEK_MAX_PRODUCTS", "10000") or 10000))
+        if self.should_stop():
+            raise ScrapeCancelled("Zeybek Market cekimi durduruldu")
+        print("Zeybek Market: katalog verisi aliniyor.", flush=True)
         payload = await asyncio.to_thread(_fetch_catalog, limit)
+        if self.should_stop():
+            raise ScrapeCancelled("Zeybek Market cekimi durduruldu")
         rows = _parse_products(payload, scraped_at)
+        for completed in range(250, len(rows) + 250, 250):
+            if self.should_stop():
+                raise ScrapeCancelled("Zeybek Market cekimi durduruldu")
+            shown = min(completed, len(rows))
+            print(
+                f"Zeybek Market: {shown}/{len(rows)} urun hazirlandi.",
+                flush=True,
+            )
+            if shown == len(rows):
+                break
 
         unique = {}
         for row in rows:

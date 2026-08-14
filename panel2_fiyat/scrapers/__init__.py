@@ -31,6 +31,7 @@ class BasePriceScraper(ABC):
         self.password       = site_config.get("password", "")
         self.is_our_catalog = site_config.get("is_our_catalog", False)
         self.brands         = site_config.get("brands", [])
+        self.should_stop    = lambda: False
 
     @abstractmethod
     async def scrape(self) -> list[dict]:

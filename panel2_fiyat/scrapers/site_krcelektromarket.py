@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 
 import requests
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 
 
@@ -160,7 +161,12 @@ def _parse_products(payload: dict, scraped_at: str) -> list[dict]:
     ]
 
 
-def _fetch_catalog(page_size: int, max_products: int) -> list[dict]:
+def _fetch_catalog(
+    page_size: int,
+    max_products: int,
+    should_stop=None,
+) -> list[dict]:
+    should_stop = should_stop or (lambda: False)
     session = requests.Session()
     session.headers.update({
         "User-Agent": (
@@ -176,8 +182,12 @@ def _fetch_catalog(page_size: int, max_products: int) -> list[dict]:
     products = []
     max_pages = max(1, math.ceil(max_products / page_size))
     for page in range(1, max_pages + 1):
+        if should_stop():
+            raise ScrapeCancelled("KRC Elektromarket cekimi durduruldu")
         last_error = None
         for attempt in range(3):
+            if should_stop():
+                raise ScrapeCancelled("KRC Elektromarket cekimi durduruldu")
             try:
                 response = session.get(
                     SERVICE_URL,
@@ -202,9 +212,16 @@ def _fetch_catalog(page_size: int, max_products: int) -> list[dict]:
 
         remaining = max_products - len(products)
         products.extend(page_products[:remaining])
+        print(
+            f"KRC Elektromarket: {page}/{max_pages} katalog sayfasi islendi, "
+            f"{len(products)} urun alindi.",
+            flush=True,
+        )
         if len(page_products) < page_size or len(products) >= max_products:
             break
 
+    if should_stop():
+        raise ScrapeCancelled("KRC Elektromarket cekimi durduruldu")
     return products
 
 
@@ -221,12 +238,27 @@ class KrcElektromarketScraper(BasePriceScraper):
         max_products = max(
             1, int(os.getenv("KRC_ELEKTROMARKET_MAX_PRODUCTS", "200000") or 200000)
         )
+        if self.should_stop():
+            raise ScrapeCancelled("KRC Elektromarket cekimi durduruldu")
         products = await asyncio.to_thread(
             _fetch_catalog,
             page_size,
             max_products,
+            self.should_stop,
         )
+        if self.should_stop():
+            raise ScrapeCancelled("KRC Elektromarket cekimi durduruldu")
         rows = _parse_products({"PRODUCTS": products}, scraped_at)
+        for completed in range(250, len(rows) + 250, 250):
+            if self.should_stop():
+                raise ScrapeCancelled("KRC Elektromarket cekimi durduruldu")
+            shown = min(completed, len(rows))
+            print(
+                f"KRC Elektromarket: {shown}/{len(rows)} urun hazirlandi.",
+                flush=True,
+            )
+            if shown == len(rows):
+                break
 
         unique = {}
         for row in rows:

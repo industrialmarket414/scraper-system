@@ -12,6 +12,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 from panel2_fiyat.scrapers._generic import _infer_product_code, _parse_tr_price
 
@@ -243,6 +244,8 @@ class ElektrikmarketScraper(BasePriceScraper):
         page_jobs: list[tuple[str, str]] = []
 
         for category, path in CATEGORIES:
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrikmarket cekimi durduruldu")
             first_url = urljoin(BASE_URL, path)
             html = _fetch_html(first_url)
             first_pages[category] = html
@@ -251,17 +254,31 @@ class ElektrikmarketScraper(BasePriceScraper):
 
         all_rows = []
         for category, html in first_pages.items():
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrikmarket cekimi durduruldu")
             all_rows.extend(
                 _parse_category_products(html, category, scraped_at)
             )
 
         failures = []
-        with ThreadPoolExecutor(max_workers=CATEGORY_WORKERS) as pool:
-            future_map = {
-                pool.submit(_fetch_html, url): (category, url)
-                for category, url in page_jobs
-            }
-            for future in as_completed(future_map):
+        pool = ThreadPoolExecutor(max_workers=CATEGORY_WORKERS)
+        try:
+            pending_jobs = iter(page_jobs)
+            future_map = {}
+            for _ in range(CATEGORY_WORKERS):
+                try:
+                    category, url = next(pending_jobs)
+                except StopIteration:
+                    break
+                future_map[pool.submit(_fetch_html, url)] = (category, url)
+            completed = 0
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Elektrikmarket cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 category, url = future_map.pop(future)
                 try:
                     all_rows.extend(
@@ -271,6 +288,28 @@ class ElektrikmarketScraper(BasePriceScraper):
                     )
                 except Exception as exc:
                     failures.append(f"{url}: {exc}")
+                completed += 1
+                if not self.should_stop():
+                    try:
+                        next_category, next_url = next(pending_jobs)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(_fetch_html, next_url)] = (
+                            next_category,
+                            next_url,
+                        )
+                if completed % 50 == 0 or completed == len(page_jobs):
+                    print(
+                        f"Elektrikmarket: {completed}/{len(page_jobs)} "
+                        "katalog sayfasi islendi.",
+                        flush=True,
+                    )
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if failures:
             raise RuntimeError(
@@ -293,17 +332,28 @@ class ElektrikmarketScraper(BasePriceScraper):
             if row["url"] not in detail_urls:
                 row["stock_quantity"] = 0
 
-        with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
-            future_map = {
-                pool.submit(
+        pool = ThreadPoolExecutor(max_workers=DETAIL_WORKERS)
+        try:
+            pending_rows = iter(detail_rows)
+            future_map = {}
+            for _ in range(DETAIL_WORKERS):
+                try:
+                    row = next(pending_rows)
+                except StopIteration:
+                    break
+                future_map[pool.submit(
                     _fetch_detail,
                     row["url"],
                     row["_expects_stock"],
-                ): row
-                for row in detail_rows
-            }
+                )] = row
             completed = 0
-            for future in as_completed(future_map):
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Elektrikmarket cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 row = future_map.pop(future)
                 try:
                     product_code, quantity = future.result()
@@ -314,12 +364,29 @@ class ElektrikmarketScraper(BasePriceScraper):
                 except Exception as exc:
                     detail_failures.append(f"{row['url']}: {exc}")
                 completed += 1
-                if completed % 500 == 0 or completed == len(detail_rows):
+                if not self.should_stop():
+                    try:
+                        next_row = next(pending_rows)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(
+                            _fetch_detail,
+                            next_row["url"],
+                            next_row["_expects_stock"],
+                        )] = next_row
+                if completed % 250 == 0 or completed == len(detail_rows):
                     print(
                         f"Elektrikmarket: {completed}/{len(detail_rows)} "
                         "ürün detayı işlendi.",
                         flush=True,
                     )
+
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if detail_failures:
             raise RuntimeError(

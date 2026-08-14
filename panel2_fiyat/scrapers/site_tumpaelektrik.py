@@ -11,6 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 from panel2_fiyat.scrapers._generic import _launch_chromium
 
@@ -255,9 +256,14 @@ async def _action_page_products(
     return products
 
 
-async def _scrape_category_pages(page, path: str) -> list[dict]:
+async def _scrape_category_pages(page, path: str, should_stop=None) -> list[dict]:
+    should_stop = should_stop or (lambda: False)
+    if should_stop():
+        raise ScrapeCancelled("Tumpa Elektrik cekimi durduruldu")
     url = urljoin(BASE_URL, path)
     await page.goto(url, wait_until="domcontentloaded", timeout=90_000)
+    if should_stop():
+        raise ScrapeCancelled("Tumpa Elektrik cekimi durduruldu")
     await page.wait_for_selector(".productItem", timeout=30_000)
     products = _products_from_html(await page.content())
     if not products:
@@ -290,6 +296,8 @@ async def _scrape_category_pages(page, path: str) -> list[dict]:
         raise RuntimeError("Tümpa Elektrik sayfalama anahtarı bulunamadı.")
 
     for page_no in range(2, page_count + 1):
+        if should_stop():
+            raise ScrapeCancelled("Tumpa Elektrik cekimi durduruldu")
         products.extend(
             await _action_page_products(
                 page,
@@ -325,13 +333,39 @@ class TumpaScraper(BasePriceScraper):
                         await route.continue_()
 
                 await page.route("**/*", block_heavy_assets)
-                for category, path in categories:
-                    products = await _scrape_category_pages(page, path)
+                for index, (category, path) in enumerate(categories, start=1):
+                    if self.should_stop():
+                        raise ScrapeCancelled("Tumpa Elektrik cekimi durduruldu")
+                    print(
+                        f"Tumpa Elektrik: {index}/{len(categories)} "
+                        f"kategori basladi: {category}",
+                        flush=True,
+                    )
+                    products = await _scrape_category_pages(
+                        page,
+                        path,
+                        self.should_stop,
+                    )
+                    if self.should_stop():
+                        raise ScrapeCancelled("Tumpa Elektrik cekimi durduruldu")
                     category_rows = [
                         _product_row(product, category, scraped_at)
                         for product in products
                     ]
                     rows.extend(category_rows)
+                    print(
+                        f"Tumpa Elektrik: {index}/{len(categories)} "
+                        f"kategori bitti, {len(category_rows)} urun.",
+                        flush=True,
+                    )
+                    if (
+                        len(rows) % 250 < len(category_rows)
+                        or index == len(categories)
+                    ):
+                        print(
+                            f"Tumpa Elektrik: {len(rows)} urun hazirlandi.",
+                            flush=True,
+                        )
                     print(
                         f"Tümpa Elektrik: {category} - "
                         f"{len(category_rows)} ürün.",

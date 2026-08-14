@@ -17,6 +17,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 from panel2_fiyat.scrapers._generic import _infer_product_code, _parse_tr_price
 
@@ -249,6 +250,8 @@ class StarakimScraper(BasePriceScraper):
         jobs: list[tuple[str, str]] = []
 
         for category, path in CATEGORIES:
+            if self.should_stop():
+                raise ScrapeCancelled("Star Akim cekimi durduruldu")
             first_url = urljoin(BASE_URL, path)
             html = _fetch_html(first_url)
             first_pages[category] = html
@@ -257,6 +260,8 @@ class StarakimScraper(BasePriceScraper):
 
         all_rows = []
         for category, html in first_pages.items():
+            if self.should_stop():
+                raise ScrapeCancelled("Star Akim cekimi durduruldu")
             all_rows.extend(_parse_products(html, category, scraped_at))
 
         failures = []
@@ -265,7 +270,10 @@ class StarakimScraper(BasePriceScraper):
                 pool.submit(_fetch_html, url): (category, url)
                 for category, url in jobs
             }
+            completed = 0
             for future in as_completed(future_map):
+                if self.should_stop():
+                    raise ScrapeCancelled("Star Akim cekimi durduruldu")
                 category, url = future_map[future]
                 try:
                     all_rows.extend(
@@ -273,6 +281,13 @@ class StarakimScraper(BasePriceScraper):
                     )
                 except Exception as exc:
                     failures.append(f"{url}: {exc}")
+                completed += 1
+                if completed % 50 == 0 or completed == len(jobs):
+                    print(
+                        "Star Akim: "
+                        f"{completed}/{len(jobs)} katalog sayfasi islendi.",
+                        flush=True,
+                    )
 
         if failures:
             raise RuntimeError(
@@ -299,19 +314,55 @@ class StarakimScraper(BasePriceScraper):
         # Liste sayfası sadece sepete eklenebilirliği gösteriyor. Gerçek stok adedi,
         # ürün detay kaynağındaki PRODUCT_DATA.quantity alanında yayınlanıyor.
         detail_failures = []
-        with ThreadPoolExecutor(max_workers=DETAIL_WORKERS) as pool:
-            future_map = {
-                pool.submit(_enrich_product_detail, row): row
-                for row in rows
-                if row.get("url")
-            }
-            for future in as_completed(future_map):
+        detail_rows = [row for row in rows if row.get("url")]
+        pool = ThreadPoolExecutor(max_workers=DETAIL_WORKERS)
+        try:
+            pending_rows = iter(detail_rows)
+            future_map = {}
+            for _ in range(DETAIL_WORKERS):
+                try:
+                    row = next(pending_rows)
+                except StopIteration:
+                    break
+                future_map[pool.submit(_enrich_product_detail, row)] = row
+            detail_completed = 0
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Star Akim cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
+                row = future_map.pop(future)
                 try:
                     future.result()
                 except Exception as exc:
-                    detail_failures.append(
-                        f"{future_map[future].get('url')}: {exc}"
+                    detail_failures.append(f"{row.get('url')}: {exc}")
+                detail_completed += 1
+                if not self.should_stop():
+                    try:
+                        next_row = next(pending_rows)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(
+                            _enrich_product_detail,
+                            next_row,
+                        )] = next_row
+                if (
+                    detail_completed % 250 == 0
+                    or detail_completed == len(detail_rows)
+                ):
+                    print(
+                        "Star Akim: "
+                        f"{detail_completed}/{len(detail_rows)} stok detay urunu islendi.",
+                        flush=True,
                     )
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         # Tekil geçici hatalar tüm taramayı düşürmesin; ancak anlamlı veri kaybını
         # sessizce kabul etme.

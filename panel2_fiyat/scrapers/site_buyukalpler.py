@@ -6,11 +6,12 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from datetime import datetime
 
 import requests
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 
 
@@ -276,16 +277,26 @@ class BuyukalplerScraper(BasePriceScraper):
 
     def _scrape_sync(self) -> list[dict]:
         scraped_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if self.should_stop():
+            raise ScrapeCancelled("Buyukalpler cekimi durduruldu")
         urls = _product_urls()
+        if self.should_stop():
+            raise ScrapeCancelled("Buyukalpler cekimi durduruldu")
         limit = int(os.getenv("BUYUKALPLER_MAX_PRODUCTS", "0") or 0)
         if limit > 0:
             urls = urls[:limit]
+        print(
+            f"Buyukalpler: {len(urls)} urun icin cekim basladi.",
+            flush=True,
+        )
 
         cache_path = os.getenv("BUYUKALPLER_CACHE", "").strip()
         cache = _load_cache(cache_path)
         rows = []
         pending = []
         for url in urls:
+            if self.should_stop():
+                raise ScrapeCancelled("Buyukalpler cekimi durduruldu")
             if url in cache:
                 cached = cache[url]
                 if cached:
@@ -304,12 +315,23 @@ class BuyukalplerScraper(BasePriceScraper):
         )
         failures = []
         completed = len(urls) - len(pending)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_map = {
-                pool.submit(_fetch_product, url, scraped_at): url
-                for url in pending
-            }
-            for future in as_completed(future_map):
+        pool = ThreadPoolExecutor(max_workers=workers)
+        try:
+            pending_urls = iter(pending)
+            future_map = {}
+            for _ in range(workers):
+                try:
+                    url = next(pending_urls)
+                except StopIteration:
+                    break
+                future_map[pool.submit(_fetch_product, url, scraped_at)] = url
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Buyukalpler cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 url = future_map.pop(future)
                 try:
                     row = future.result()
@@ -319,11 +341,28 @@ class BuyukalplerScraper(BasePriceScraper):
                 except Exception as exc:
                     failures.append(f"{url}: {exc}")
                 completed += 1
+                if not self.should_stop():
+                    try:
+                        next_url = next(pending_urls)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(
+                            _fetch_product,
+                            next_url,
+                            scraped_at,
+                        )] = next_url
                 if completed % 250 == 0 or completed == len(urls):
                     print(
                         f"Büyükalpler: {completed}/{len(urls)} ürün işlendi.",
                         flush=True,
                     )
+
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if failures:
             raise RuntimeError(

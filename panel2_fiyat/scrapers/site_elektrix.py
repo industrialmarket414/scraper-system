@@ -11,6 +11,7 @@ from urllib.parse import urljoin
 
 import requests
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 
 
@@ -217,6 +218,8 @@ class ElektrixScraper(BasePriceScraper):
         jobs: list[tuple[str, str]] = []
 
         for category, path in CATEGORIES:
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrix cekimi durduruldu")
             first_url = urljoin(BASE_URL, path)
             html = _fetch_html(first_url)
             first_pages[category] = html
@@ -225,16 +228,29 @@ class ElektrixScraper(BasePriceScraper):
 
         all_rows = []
         for category, html in first_pages.items():
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrix cekimi durduruldu")
             all_rows.extend(_parse_products(html, category, scraped_at))
 
         failures = []
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            future_map = {
-                pool.submit(_fetch_html, url): (category, url)
-                for category, url in jobs
-            }
+        pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)
+        try:
+            pending_jobs = iter(jobs)
+            future_map = {}
+            for _ in range(MAX_WORKERS):
+                try:
+                    category, url = next(pending_jobs)
+                except StopIteration:
+                    break
+                future_map[pool.submit(_fetch_html, url)] = (category, url)
             completed = 0
-            for future in as_completed(future_map):
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Elektrix cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 category, url = future_map.pop(future)
                 try:
                     all_rows.extend(
@@ -243,12 +259,28 @@ class ElektrixScraper(BasePriceScraper):
                 except Exception as exc:
                     failures.append(f"{url}: {exc}")
                 completed += 1
+                if not self.should_stop():
+                    try:
+                        next_category, next_url = next(pending_jobs)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(_fetch_html, next_url)] = (
+                            next_category,
+                            next_url,
+                        )
                 if completed % 50 == 0 or completed == len(jobs):
                     print(
                         f"Elektrix: {completed}/{len(jobs)} "
                         "ek katalog sayfası işlendi.",
                         flush=True,
                     )
+
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if failures:
             raise RuntimeError(
@@ -266,6 +298,14 @@ class ElektrixScraper(BasePriceScraper):
             unique[key] = row
 
         rows = list(unique.values())
+        for completed in range(250, len(rows) + 250, 250):
+            shown = min(completed, len(rows))
+            print(
+                f"Elektrix: {shown}/{len(rows)} urun hazirlandi.",
+                flush=True,
+            )
+            if shown == len(rows):
+                break
         if self.brands:
             selected = {brand.casefold() for brand in self.brands}
             rows = [

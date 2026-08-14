@@ -5,13 +5,14 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from datetime import datetime
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
+from panel2_fiyat.cancel import ScrapeCancelled
 from panel2_fiyat.scrapers import BasePriceScraper, register_scraper
 from panel2_fiyat.scrapers._generic import _parse_tr_price
 
@@ -293,6 +294,8 @@ class ElektrikMalzemesiScraper(BasePriceScraper):
         first_pages: dict[str, str] = {}
         page_jobs: list[tuple[str, str]] = []
         for category, path in categories:
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrik Malzemesi cekimi durduruldu")
             first_url = urljoin(BASE_URL, path)
             html = _fetch_html(first_url)
             first_pages[category] = html
@@ -301,17 +304,31 @@ class ElektrikMalzemesiScraper(BasePriceScraper):
 
         all_rows = []
         for category, html in first_pages.items():
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrik Malzemesi cekimi durduruldu")
             all_rows.extend(
                 _parse_category_products(html, category, scraped_at)
             )
 
         failures = []
-        with ThreadPoolExecutor(max_workers=CATEGORY_WORKERS) as pool:
-            future_map = {
-                pool.submit(_fetch_html, url): (category, url)
-                for category, url in page_jobs
-            }
-            for future in as_completed(future_map):
+        pool = ThreadPoolExecutor(max_workers=CATEGORY_WORKERS)
+        try:
+            pending_jobs = iter(page_jobs)
+            future_map = {}
+            for _ in range(CATEGORY_WORKERS):
+                try:
+                    category, url = next(pending_jobs)
+                except StopIteration:
+                    break
+                future_map[pool.submit(_fetch_html, url)] = (category, url)
+            completed = 0
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Elektrik Malzemesi cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 category, url = future_map.pop(future)
                 try:
                     all_rows.extend(
@@ -321,6 +338,28 @@ class ElektrikMalzemesiScraper(BasePriceScraper):
                     )
                 except Exception as exc:
                     failures.append(f"{url}: {exc}")
+                completed += 1
+                if not self.should_stop():
+                    try:
+                        next_category, next_url = next(pending_jobs)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(_fetch_html, next_url)] = (
+                            next_category,
+                            next_url,
+                        )
+                if completed % 50 == 0 or completed == len(page_jobs):
+                    print(
+                        f"Elektrik Malzemesi: {completed}/{len(page_jobs)} "
+                        "katalog sayfasi islendi.",
+                        flush=True,
+                    )
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if failures:
             raise RuntimeError(
@@ -344,6 +383,8 @@ class ElektrikMalzemesiScraper(BasePriceScraper):
         stock_cache = _load_stock_cache(cache_path)
         pending_rows = []
         for row in detail_rows:
+            if self.should_stop():
+                raise ScrapeCancelled("Elektrik Malzemesi cekimi durduruldu")
             product_id = row["_product_id"]
             if product_id in stock_cache:
                 quantity = stock_cache[product_id]
@@ -363,13 +404,24 @@ class ElektrikMalzemesiScraper(BasePriceScraper):
             ),
         )
         detail_failures = []
-        with ThreadPoolExecutor(max_workers=stock_workers) as pool:
-            future_map = {
-                pool.submit(_fetch_stock, row): row
-                for row in pending_rows
-            }
+        pool = ThreadPoolExecutor(max_workers=stock_workers)
+        try:
+            pending_iter = iter(pending_rows)
+            future_map = {}
+            for _ in range(stock_workers):
+                try:
+                    row = next(pending_iter)
+                except StopIteration:
+                    break
+                future_map[pool.submit(_fetch_stock, row)] = row
             completed = len(detail_rows) - len(pending_rows)
-            for future in as_completed(future_map):
+            while future_map:
+                if self.should_stop():
+                    raise ScrapeCancelled("Elektrik Malzemesi cekimi durduruldu")
+                try:
+                    future = next(as_completed(list(future_map), timeout=1))
+                except TimeoutError:
+                    continue
                 row = future_map.pop(future)
                 try:
                     quantity = future.result()
@@ -383,12 +435,25 @@ class ElektrikMalzemesiScraper(BasePriceScraper):
                 except Exception as exc:
                     detail_failures.append(f"{row['url']}: {exc}")
                 completed += 1
-                if completed % 500 == 0 or completed == len(detail_rows):
+                if not self.should_stop():
+                    try:
+                        next_row = next(pending_iter)
+                    except StopIteration:
+                        pass
+                    else:
+                        future_map[pool.submit(_fetch_stock, next_row)] = next_row
+                if completed % 250 == 0 or completed == len(detail_rows):
                     print(
                         f"Elektrik Malzemesi: {completed}/{len(detail_rows)} "
                         "ürün stoku işlendi.",
                         flush=True,
                     )
+
+        finally:
+            pool.shutdown(
+                wait=not self.should_stop(),
+                cancel_futures=self.should_stop(),
+            )
 
         if detail_failures:
             raise RuntimeError(

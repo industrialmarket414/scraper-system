@@ -335,9 +335,13 @@ async def _read_table_rows(page: Page) -> list[dict]:
                 marka = "0"
 
             # Ürün Kodu
+            product_url = ""
             try:
                 el = tr.locator("td.product-name a.product-code").first
                 urun_kodu = (await el.inner_text()).strip() if await el.count() else "0"
+                product_url = ((await el.get_attribute("href")) or "").strip()
+                if product_url and product_url.startswith("/"):
+                    product_url = BASE_URL + product_url
             except Exception:
                 urun_kodu = "0"
 
@@ -374,18 +378,6 @@ async def _read_table_rows(page: Page) -> list[dict]:
 
             # İskonto — önce .dusuk-iskonto, yoksa ilk .isk-value
             disc_text = ""
-            try:
-                disc_td = tr.locator("td.discount-value").first
-                if await disc_td.count():
-                    dusuk = disc_td.locator(".dusuk-iskonto")
-                    if await dusuk.count():
-                        disc_text = (await dusuk.first.inner_text()).strip()
-                    else:
-                        normal = disc_td.locator(".isk-value")
-                        if await normal.count():
-                            disc_text = (await normal.first.inner_text()).strip()
-            except Exception:
-                disc_text = ""
 
             items.append({
                 "brand":            marka or "0",
@@ -396,15 +388,114 @@ async def _read_table_rows(page: Page) -> list[dict]:
                 "price":            _parse_tr_decimal(price_text),
                 "discount_text":    disc_text,
                 "discount_percent": _parse_tr_decimal(disc_text),
+                "_product_url":      product_url,
             })
         except Exception:
             # tek satır patlarsa devam (C# ile aynı)
             continue
 
+    await _fill_detail_installment_discounts(page, items)
+
     return items
 
 
 # ── Yardımcılar (C# ExtractFirstInt / ExtractFirstDecimalTR karşılığı) ───────
+async def _fill_detail_installment_discounts(page: Page, items: list[dict]):
+    """
+    Santral liste satirinda havale iskontosu gosteriyor. Kredi karti taksit
+    iskontosu urun detay sayfasindaki Iskonto Oranlari bolumunde oldugu icin
+    urun linklerine girip TAKSIT satirlarina yakin yuzdeyi okur.
+    """
+    urls: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        url = (item.get("_product_url") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        urls.append(url)
+
+    if not urls:
+        for item in items:
+            item.pop("_product_url", None)
+        return
+
+    detail_discounts: dict[str, str] = {}
+    detail_page = await page.context.new_page()
+    try:
+        total = len(urls)
+        for idx, url in enumerate(urls, 1):
+            try:
+                await detail_page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+                await detail_page.wait_for_timeout(300)
+                body_text = await detail_page.locator("body").inner_text(timeout=10_000)
+                discount = _extract_installment_discount_from_text(body_text)
+                if discount:
+                    detail_discounts[url] = discount
+            except Exception:
+                pass
+
+            if idx % 50 == 0 or idx == total:
+                print(f"Santral: {idx}/{total} detay iskonto urunu islendi.")
+    finally:
+        await detail_page.close()
+
+    for item in items:
+        url = (item.get("_product_url") or "").strip()
+        discount = detail_discounts.get(url, "")
+        item["discount_text"] = discount
+        item["discount_percent"] = _parse_tr_decimal(discount)
+        item.pop("_product_url", None)
+
+
+def _extract_installment_discount_from_text(text: str) -> str:
+    if not text:
+        return ""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    normalized = [_normalize_tr(line) for line in lines]
+    percent_re = re.compile(r"%\s*\d+(?:[,.]\d+)?")
+    candidates: list[tuple[int, float, str]] = []
+
+    for idx, norm_line in enumerate(normalized):
+        if "TAKSIT" not in norm_line:
+            continue
+
+        window_start = max(0, idx - 2)
+        window_end = min(len(lines), idx + 5)
+        for distance, line_no in enumerate(range(idx, window_end)):
+            for match in percent_re.findall(lines[line_no]):
+                value = _parse_tr_decimal(match)
+                if value is not None:
+                    candidates.append((distance, value, match.replace(" ", "")))
+
+        # Bazi kart bloklarinda yuzde, taksit satirindan hemen once gelebilir.
+        for line_no in range(window_start, idx):
+            for match in percent_re.findall(lines[line_no]):
+                value = _parse_tr_decimal(match)
+                if value is not None:
+                    candidates.append((idx - line_no + 10, value, match.replace(" ", "")))
+
+    if candidates:
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[0][2]
+
+    return ""
+
+
+def _normalize_tr(text: str) -> str:
+    table = str.maketrans({
+        "ç": "c", "Ç": "C",
+        "ğ": "g", "Ğ": "G",
+        "ı": "i", "I": "I",
+        "İ": "I", "i": "i",
+        "ö": "o", "Ö": "O",
+        "ş": "s", "Ş": "S",
+        "ü": "u", "Ü": "U",
+    })
+    return text.translate(table).upper()
+
+
 def _extract_first_int(text: str) -> int:
     if not text:
         return 0

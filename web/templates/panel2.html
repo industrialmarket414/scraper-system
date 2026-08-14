@@ -17,13 +17,13 @@
 <div data-tabs>
     <div class="tabs">
         <button class="tab-btn active" data-tab="tab-sites">Site Durumu</button>
-        <button class="tab-btn" data-tab="tab-comparison">⚖️ Karşılaştırma</button>
-        <button class="tab-btn" data-tab="tab-advantage">📈 Avantaj Raporu</button>
+        <button class="tab-btn" data-tab="tab-comparison">⚖ Karşılaştırma</button>
+        <button class="tab-btn" data-tab="tab-advantage"> Avantaj Raporu</button>
         <button class="tab-btn" data-tab="tab-bestsellers">En Çok Satanlar</button>
         <button class="tab-btn" data-tab="tab-discounts">En İskontolu</button>
         <button class="tab-btn" data-tab="tab-cheapest">En Ucuz</button>
-        <button class="tab-btn" data-tab="tab-search">🔍 Ürün Ara</button>
-        <button class="tab-btn" data-tab="tab-ai">🤖 AI Analiz</button>
+        <button class="tab-btn" data-tab="tab-search"> Ürün Ara</button>
+        <button class="tab-btn" data-tab="tab-ai"> AI Analiz</button>
     </div>
 
     <!-- ── Site Durumu ─────────────────────────────────────────────────────── -->
@@ -58,13 +58,16 @@
                                 <div class="flex gap-8">
                                     <button class="btn btn-primary btn-sm" onclick="runSite('{{ s.id }}',this)">▶ Tara</button>
                                     {% if s.id in ['starakim', 'elektromarketim', 'elektrix', 'elektrikmarket', 'tumpaelektrik', 'zeybekmarket', 'elektrikmalzemesi', 'elektrikciden', 'ucfaz', 'aydinlatmadunyam', 'cimenelektrik', 'kozaydinlatma', 'krcelektromarket', 'buyukalpler'] %}
-                                    <a class="btn btn-success btn-sm"
-                                       href="/panel2/api/download/{{ s.id }}"
-                                       title="Son oluşan Excel'i indir">↓ Excel</a>
+                                    <button class="btn btn-ghost btn-sm"
+                                            onclick="stopPriceRun('{{ s.id }}', this)"
+                                            title="Çalışan çekimi durdur">Durdur</button>
+                                    <span id="excel-status-{{ s.id }}"
+                                          class="text-muted"
+                                          style="font-size:12px"></span>
                                     {% endif %}
                                     <button class="btn btn-ghost btn-sm"
                                             onclick="document.getElementById('logo-file-{{ s.id }}').click()"
-                                            title="Logo yükle">🖼 Logo</button>
+                                            title="Logo yükle"> Logo</button>
                                     <button class="btn btn-ghost btn-sm"
                                             onclick="toggleOurCatalog('{{ s.id }}', {{ 'false' if s.get('is_our_catalog') else 'true' }})"
                                             title="Kendi sitemiz mi?">{{ '★ Katalogtan Çıkar' if s.get('is_our_catalog') else '☆ Bizim Katalog' }}</button>
@@ -91,7 +94,7 @@
             </div>
         </div>
         {% else %}
-        <div class="card"><div class="empty-state"><div class="empty-icon">📊</div><p>Henüz site eklenmemiş.</p><a href="/settings" class="btn btn-primary" style="margin-top:14px">⚙ Ayarlara Git</a></div></div>
+        <div class="card"><div class="empty-state"><div class="empty-icon"></div><p>Henüz site eklenmemiş.</p><a href="/settings" class="btn btn-primary" style="margin-top:14px">⚙ Ayarlara Git</a></div></div>
         {% endif %}
     </div>
 
@@ -100,7 +103,7 @@
         <div class="card mb-20">
             <div class="flex-between">
                 <div>
-                    <div class="card-title">⚖️ Ürün Karşılaştırması</div>
+                    <div class="card-title">⚖ Ürün Karşılaştırması</div>
                     <p class="text-muted" style="font-size:13px;margin-top:4px">
                         Kendi katalogumuzdaki ürünlerin rakip sitelerle fiyat/iskonto karşılaştırması.
                         Önce <b>Ayarlar → Fiyat Siteleri</b>'nde kendi sitenizi "Bizim Katalog" olarak
@@ -128,13 +131,13 @@
     <div id="tab-advantage" class="tab-panel">
         <div class="card mb-20">
             <div class="flex-between">
-                <div class="card-title">📈 Avantaj / Dezavantaj Raporu</div>
+                <div class="card-title"> Avantaj / Dezavantaj Raporu</div>
                 <button class="btn btn-primary btn-sm" onclick="loadAdvantage()">Getir</button>
             </div>
         </div>
         <div id="adv-summary" class="grid-4 mb-20"></div>
         <div class="card mb-20">
-            <div class="card-title" style="padding:8px 0">🟢 En Avantajlı Olduğumuz Ürünler</div>
+            <div class="card-title" style="padding:8px 0"> En Avantajlı Olduğumuz Ürünler</div>
             <div class="table-container">
                 <table id="adv-top-table">
                     <thead><tr><th>EM Kodu</th><th>Bizim Fiyat</th><th>Rakip Ort.</th><th>Fark %</th></tr></thead>
@@ -143,7 +146,7 @@
             </div>
         </div>
         <div class="card">
-            <div class="card-title" style="padding:8px 0">🔴 En Geride Olduğumuz Ürünler</div>
+            <div class="card-title" style="padding:8px 0"> En Geride Olduğumuz Ürünler</div>
             <div class="table-container">
                 <table id="adv-bottom-table">
                     <thead><tr><th>EM Kodu</th><th>Bizim Fiyat</th><th>Rakip Ort.</th><th>Fark %</th></tr></thead>
@@ -239,7 +242,7 @@
         <div class="card mb-20">
             <div class="flex-between">
                 <div>
-                    <div class="card-title">🤖 AI Destekli Analiz Raporu</div>
+                    <div class="card-title"> AI Destekli Analiz Raporu</div>
                     <div class="form-hint" style="margin-top:4px">
                         28 kaynaktan toplanan veriler Claude AI'ya gönderilir. Analiz 30-90 saniye sürebilir.
                     </div>
@@ -248,14 +251,14 @@
                     <select class="form-select" id="ai-report-list" style="max-width:240px" onchange="loadReport(this.value)">
                         <option value="">— Geçmiş Raporlar —</option>
                     </select>
-                    <button class="btn btn-primary" id="ai-start-btn" onclick="startAnalysis()">🤖 Analiz Başlat</button>
+                    <button class="btn btn-primary" id="ai-start-btn" onclick="startAnalysis()"> Analiz Başlat</button>
                 </div>
             </div>
         </div>
         <div class="card">
             <div id="ai-content">
                 <div class="ai-placeholder">
-                    <div class="ai-placeholder-icon">🤖</div>
+                    <div class="ai-placeholder-icon"></div>
                     <p>"Analiz Başlat" butonuna basın.</p>
                     <p style="font-size:12px;margin-top:6px">Önce Ayarlar → AI Ayarları bölümünden Claude API anahtarınızı ekleyin.</p>
                 </div>
@@ -272,13 +275,13 @@ const lnk = url => url ? `<a href="${url}" target="_blank" class="btn btn-ghost 
 const emp = (c,m) => `<tr><td colspan="${c}" class="text-muted" style="text-align:center;padding:32px">${m}</td></tr>`;
 
 const VERDICT_LABELS = {
-    en_ucuz: '🟢 En Ucuz', ortalama_alti: '🟢 Ort. Altı', ortalama: '🟡 Ortalama',
-    ortalama_ustu: '🔴 Ort. Üstü', en_pahali: '🔴 En Pahalı', tek_basina: '⚪ Tek',
+    en_ucuz: ' En Ucuz', ortalama_alti: ' Ort. Altı', ortalama: ' Ortalama',
+    ortalama_ustu: ' Ort. Üstü', en_pahali: ' En Pahalı', tek_basina: '⚪ Tek',
 };
 
 async function loadComparison() {
     const tb = document.querySelector('#cmp-table tbody');
-    tb.innerHTML = emp(10, '⏳ Yükleniyor...');
+    tb.innerHTML = emp(10, ' Yükleniyor...');
     try {
         const d = await api('GET', '/panel2/api/comparison/all');
         if (!d.length) {
@@ -315,15 +318,15 @@ async function loadComparison() {
 
 async function loadAdvantage() {
     const sumEl = document.getElementById('adv-summary');
-    sumEl.innerHTML = '<div class="text-muted">⏳ Yükleniyor...</div>';
+    sumEl.innerHTML = '<div class="text-muted"> Yükleniyor...</div>';
     try {
         const r = await api('GET', '/panel2/api/advantage/report');
         const s = r.summary;
         sumEl.innerHTML = `
             <div class="stat-card"><div class="stat-label">Toplam</div><div class="stat-value">${s.total}</div></div>
-            <div class="stat-card"><div class="stat-label">🟢 Avantajlı</div><div class="stat-value" style="color:#16a34a">${s.avantajli}</div></div>
-            <div class="stat-card"><div class="stat-label">🟡 Rekabetçi</div><div class="stat-value" style="color:#d97706">${s.rekabetci}</div></div>
-            <div class="stat-card"><div class="stat-label">🔴 Geride</div><div class="stat-value" style="color:#dc2626">${s.geride}</div></div>`;
+            <div class="stat-card"><div class="stat-label"> Avantajlı</div><div class="stat-value" style="color:#16a34a">${s.avantajli}</div></div>
+            <div class="stat-card"><div class="stat-label"> Rekabetçi</div><div class="stat-value" style="color:#d97706">${s.rekabetci}</div></div>
+            <div class="stat-card"><div class="stat-label"> Geride</div><div class="stat-value" style="color:#dc2626">${s.geride}</div></div>`;
 
         const top = await api('GET', '/panel2/api/advantage/top?limit=15');
         const tb1 = document.querySelector('#adv-top-table tbody');
@@ -364,17 +367,106 @@ async function uploadPriceSiteLogo(siteId, inp) {
     }
 }
 
-async function runAll(btn) {
-    btn.disabled=true; btn.textContent='⏳';
-    try { await api('POST','/panel2/api/run/all'); showToast('Tarama başlatıldı','info'); }
-    catch(e) { showToast(e.message,'error'); }
-    setTimeout(()=>{btn.disabled=false;btn.textContent='▶ Tümünü Tara';},5000);
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
-async function runSite(id,btn) {
-    btn.disabled=true; btn.textContent='⏳';
-    try { await api('POST',`/panel2/api/run/${id}`); showToast('Tarama başlatıldı','info'); }
-    catch(e) { showToast(e.message,'error'); }
-    setTimeout(()=>{btn.disabled=false;btn.textContent='▶ Tara';},5000);
+
+function setButtonLoading(btn, text) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> ${text}`;
+}
+
+async function waitForPriceRun(siteId, btn) {
+    for (let i = 0; i < 720; i++) {
+        const status = await api('GET', `/panel2/api/run/status/${siteId}`);
+        if (!status.running && status.status !== 'idle') return status;
+        const minutes = status.elapsed_minutes || 0;
+        btn.innerHTML = `<span class="spinner"></span> Taranyor${minutes ? ` (${minutes} dk)` : ''}`;
+        await sleep(5000);
+    }
+    throw new Error('Tarama ok uzun srd; loglar kontrol edin.');
+}
+
+async function waitForAnyPriceRun(btn) {
+    let sawRunning = false;
+    for (let i = 0; i < 1440; i++) {
+        const statuses = await api('GET', '/panel2/api/run/status');
+        const list = Object.values(statuses || {});
+        const running = list.filter(item => item.running);
+        if (running.length) {
+            sawRunning = true;
+            btn.innerHTML = `<span class="spinner"></span> Taranyor (${running.length})`;
+        }
+        if (sawRunning && !running.length) return statuses;
+        await sleep(5000);
+    }
+    throw new Error('Toplu tarama ok uzun srd; loglar kontrol edin.');
+}
+
+async function stopPriceRun(siteId, btn) {
+    const original = btn.textContent;
+    const status = document.getElementById(`excel-status-${siteId}`);
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner"></span> Durduruluyor`;
+    if (status) {
+        status.textContent = 'Durduruluyor...';
+        status.style.color = '#f97316';
+    }
+    try {
+        await api('POST', `/panel2/api/run/stop/${siteId}`);
+        if (status) {
+            status.textContent = 'Durduruldu';
+            status.style.color = '#f97316';
+        }
+        showToast('Tarama durduruldu', 'info');
+    } catch(e) {
+        if (status) {
+            status.textContent = 'Durdurma hatas: ' + e.message;
+            status.style.color = '#dc2626';
+        }
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+}
+
+async function runAll(btn) {
+    const original = ' Tmn Tara';
+    setButtonLoading(btn, 'Taranyor');
+    try {
+        await api('POST', '/panel2/api/run/all');
+        showToast('Tarama balad', 'info');
+        await waitForAnyPriceRun(btn);
+        showToast('Tarama tamamland', 'success');
+    } catch(e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+}
+
+async function runSite(id, btn) {
+    const original = ' Tara';
+    setButtonLoading(btn, 'Taranyor');
+    try {
+        await api('POST', `/panel2/api/run/${id}`);
+        showToast('Tarama balad', 'info');
+        const status = await waitForPriceRun(id, btn);
+        if (status.status === 'success') {
+            showToast(`${status.product_count || 0} rn ekildi`, 'success');
+        } else if (status.status === 'stopped') {
+            showToast('Tarama durduruldu', 'info');
+        } else {
+            throw new Error(status.error || 'Tarama tamamlanamad');
+        }
+    } catch(e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
 }
 
 async function loadBestsellers() {
@@ -456,7 +548,7 @@ async function loadReport(id) {
         const r = await api('GET', `/panel2/api/ai/reports/${id}`);
         document.getElementById('ai-content').innerHTML =
             `<div style="padding:4px 0;margin-bottom:12px;font-size:12px;color:var(--text-3)">
-                📅 ${r.created_at} &nbsp;·&nbsp; ${r.input_summary || ''} &nbsp;·&nbsp; ${r.token_count||0} token
+                 ${r.created_at} &nbsp;·&nbsp; ${r.input_summary || ''} &nbsp;·&nbsp; ${r.token_count||0} token
              </div>
              <div class="ai-report">${r.report_html}</div>`;
         document.getElementById('ai-report-list').value = id;
