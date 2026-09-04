@@ -8,6 +8,7 @@ Sütunlar: Marka | Ürün Kodu | Stok | İskonto | Liste Fiyat
 import asyncio
 import os
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from playwright.async_api import async_playwright, Page
 from panel1_b2b.scrapers import BaseB2BScraper, register_scraper
@@ -83,8 +84,11 @@ class AnkaScraper(BaseB2BScraper):
                 else:
                     selected = all_brands  # hepsi
 
+                request_template = await _capture_product_request_template(page)
                 for brand_val, brand_txt in selected:
-                    items = await _scrape_brand(page, brand_val, brand_txt)
+                    items = await _scrape_brand_api(
+                        page, request_template, brand_val, brand_txt
+                    )
                     products.extend(items)
 
             finally:
@@ -225,6 +229,97 @@ async def _get_brand_options(page: Page) -> list[tuple[str, str]]:
         if val:
             brands.append((val, txt))
     return brands
+
+
+async def _capture_product_request_template(page: Page) -> str:
+    """DataTables'ın geçerli oturum/kolon parametrelerini taşıyan API URL'sini al."""
+    async with page.expect_response(
+        lambda response: (
+            response.request.resource_type in {"xhr", "fetch"}
+            and response.url.startswith(f"{PRODUCTS_URL}?")
+        ),
+        timeout=30_000,
+    ) as response_info:
+        await page.evaluate(
+            """() => {
+                const table = window.jQuery?.fn?.dataTable
+                    ? jQuery('#productTable').DataTable()
+                    : null;
+                if (table) table.ajax.reload();
+            }"""
+        )
+    return (await response_info.value).url
+
+
+def _product_api_url(template_url: str, brand_id: str, start: int, length: int) -> str:
+    """Tekrarlı DataTables kolon parametrelerini bozmadan sayfa değerlerini değiştir."""
+    parts = urlsplit(template_url)
+    replacements = {
+        "brand_id": str(brand_id),
+        "start": str(start),
+        "length": str(length),
+    }
+    params = [
+        (key, replacements.get(key, value))
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+    ]
+    return urlunsplit((
+        parts.scheme,
+        parts.netloc,
+        parts.path,
+        urlencode(params),
+        parts.fragment,
+    ))
+
+
+async def _scrape_brand_api(
+    page: Page,
+    request_template: str,
+    brand_val: str,
+    brand_txt: str,
+    page_size: int = 100,
+) -> list[dict]:
+    """Anka'nın hatalı toplam sayısına güvenmeden marka ürünlerini sayfalar."""
+    items: list[dict] = []
+    seen_codes: set[str] = set()
+    start = 0
+
+    while True:
+        url = _product_api_url(request_template, brand_val, start, page_size)
+        response = await page.request.get(
+            url, headers={"X-Requested-With": "XMLHttpRequest"}, timeout=45_000
+        )
+        if not response.ok:
+            raise RuntimeError(
+                f"Anka {brand_txt} ürün API isteği başarısız: HTTP {response.status}"
+            )
+        payload = await response.json()
+        rows = payload.get("data") or []
+        new_count = 0
+        for row in rows:
+            code = str(row.get("code") or "").strip()
+            key = code.casefold()
+            if not code or key in seen_codes:
+                continue
+            seen_codes.add(key)
+            new_count += 1
+            items.append({
+                "brand": str(row.get("brand") or brand_txt).strip(),
+                "product_code": code,
+                "stock": str(row.get("stock") if row.get("stock") is not None else "").strip(),
+                "min_package_qty": str(row.get("min_order") if row.get("min_order") is not None else "").strip(),
+                "discount_text": str(row.get("discount") or "").strip(),
+                "price_text": str(row.get("price") or "").strip(),
+            })
+
+        if len(rows) < page_size:
+            break
+        if new_count == 0:
+            # Sunucu start parametresini yok sayarsa sonsuz döngüyü engelle.
+            break
+        start += page_size
+
+    return items
 
 
 # ── Marka seç (Chosen.js) ─────────────────────────────────────────────────────

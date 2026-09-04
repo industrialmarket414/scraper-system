@@ -21,6 +21,7 @@ os.environ.setdefault(
 )
 
 LOGIN_URL = "https://b2b.kiracelektrik.com/bayi-girisi-sayfasi"
+PAGE_TIMEOUT_MS = 90_000
 
 ALL_BRANDS = [
     "schneider-electric", "siemens", "legrand", "bticino", "oznur",
@@ -71,7 +72,7 @@ class KiracScraper(BaseB2BScraper):
 
 # ── Giriş ─────────────────────────────────────────────────────────────────────
 async def _do_login(page: Page, username: str, password: str):
-    await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=30_000)
+    await page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
     await page.wait_for_timeout(3000)
 
     for sel in [
@@ -107,7 +108,7 @@ async def _scrape_brand(page: Page, brand: str) -> list[dict]:
     await page.goto(
         f"https://b2b.kiracelektrik.com/{brand}?ps=999",
         wait_until="domcontentloaded",
-        timeout=30_000,
+        timeout=PAGE_TIMEOUT_MS,
     )
     await page.wait_for_timeout(3000)
 
@@ -225,7 +226,7 @@ async def _get_product_details(page: Page, product_url: str) -> dict[str, str]:
         return details
 
     try:
-        response = await page.context.request.get(product_url, timeout=30_000)
+        response = await page.context.request.get(product_url, timeout=PAGE_TIMEOUT_MS)
         if not response.ok:
             return details
 

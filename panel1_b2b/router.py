@@ -15,6 +15,7 @@ LOGOS_DIR = BASE_DIR / "web" / "static" / "logos"
 LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 
 router = APIRouter()
+_background_tasks: set[asyncio.Task] = set()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -81,7 +82,9 @@ async def manual_run(site_id: str):
             f"{site['name']} — Manuel veri çekimi başlatıldı")
 
     # asyncio.create_task → task_manager'a register edilecek
-    asyncio.create_task(run_b2b_site(site, "manual"))
+    task = asyncio.create_task(run_b2b_site(site, "manual"))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {"status": "started", "site_id": site_id}
 
 

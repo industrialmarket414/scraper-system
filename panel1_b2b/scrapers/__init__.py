@@ -89,3 +89,4 @@ from panel1_b2b.scrapers import b2b_anka     # noqa: E402, F401
 from panel1_b2b.scrapers import b2b_santral  # noqa: E402, F401
 from panel1_b2b.scrapers import b2b_vekmar   # noqa: E402, F401
 from panel1_b2b.scrapers import b2b_meanwell # noqa: E402, F401
+from panel1_b2b.scrapers import b2b_simtes   # noqa: E402, F401

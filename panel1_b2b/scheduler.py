@@ -61,8 +61,6 @@ async def run_b2b_site(site_config: dict, trigger_type: str = "manual",
         hata_mesajı None ise başarılı, dolu string ise hata olmuştur.
     """
     from panel1_b2b.task_manager import is_running, register, unregister
-    from panel1_b2b.scrapers import get_scraper
-    from panel1_b2b.excel_exporter import export_to_excel
     from core.database import get_conn
 
     site_id   = site_config["id"]
@@ -83,7 +81,17 @@ async def run_b2b_site(site_config: dict, trigger_type: str = "manual",
     error_msg: str | None = None
 
     try:
-        scraper  = get_scraper(site_config)
+        # Scraper bağımlılığı eksikse de hata bu görev içinde yakalanıp
+        # panel geçmişine yazılsın; asyncio'da sahipsiz exception oluşmasın.
+        from panel1_b2b.scrapers import get_scraper
+        from panel1_b2b.excel_exporter import export_to_excel
+
+        # Scraper manuel düğme ile mi yoksa zamanlayıcıyla mı açıldığını bilsin.
+        # Özellikle Simtes, manuel çalışmada kullanıcı girişini beklerken
+        # zamanlanmış çalışmada kayıtlı oturumu kullanır.
+        runtime_site_config = dict(site_config)
+        runtime_site_config["_trigger_type"] = trigger_type
+        scraper  = get_scraper(runtime_site_config)
         products = await scraper.run()
 
         # EM (Endüstriyel Market) kodu ile zenginleştir — mapping varsa

@@ -148,7 +148,10 @@ def clear_run_status(site_id: str):
 
 def _send_price_summary_mail(results: list[dict]):
     settings = load_settings()
-    recipients = list(settings.get("email", {}).get("recipients", []))
+    recipients = list(
+        settings.get("price_email_recipients")
+        or settings.get("email", {}).get("recipients", [])
+    )
     if not recipients:
         return
 
@@ -255,7 +258,9 @@ def _send_single_price_excel_mail(site: dict, product_count: int, output: Path |
         return
     settings = load_settings()
     recipients = list(
-        site.get("mail_recipients") or settings.get("email", {}).get("recipients", [])
+        site.get("mail_recipients")
+        or settings.get("price_email_recipients")
+        or settings.get("email", {}).get("recipients", [])
     )
     if not recipients:
         return
